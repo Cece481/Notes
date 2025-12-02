@@ -9,7 +9,7 @@ Things to add
 8. also make possible to update automatically from GitHub.
 9. don't make it background process make it App.
 10. don't move button at left when pressing.
-11. also add possibility to change color and text size.
+11. also add possibility to change color and size of text.
 12. auto numbering.
 13. make button more small size.
 14. add opacity, colors and animation change section at settings.
