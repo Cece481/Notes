@@ -324,8 +324,8 @@ class OverlayMainWindow(QMainWindow):
     
     def _clamp_button_position(self, desired_y: int) -> int:
         """Keep button within the vertical bounds of the screen."""
-        screen_geometry = QApplication.primaryScreen().geometry()
-        max_y = screen_geometry.height() - config.BUTTON_HEIGHT
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        max_y = screen_geometry.height() - config.BUTTON_HEIGHT ################################################
         return max(0, min(max_y, desired_y))
     
     def _on_button_drag_started(self, global_y: float):
