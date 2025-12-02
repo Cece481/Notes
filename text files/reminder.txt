@@ -1,0 +1,2 @@
+fix show and unhide hotkey
+fix tray icon - it is not showing when set it
