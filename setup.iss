@@ -3,10 +3,10 @@ AppName=NotesOverlay
 AppVersion=1.6
 DefaultDirName={pf}\NotesOverlay
 OutputDir=C:\Users\btser\OneDrive\Documents\GitHub\Notes\dist
-OutputBaseFilename=NotesOverlay_Setup
+OutputBaseFilename=NotesOverlay_1.6_Setup
 
 [Files]
-Source: "C:\Users\btser\OneDrive\Documents\GitHub\Notes\dist\main.exe"; DestDir: "{app}"; DestName: "NotesOverlay.exe"
+Source: "C:\Users\btser\OneDrive\Documents\GitHub\Notes\dist\NotesOverlay.exe"; DestDir: "{app}"; DestName: "NotesOverlay.exe"
 Source: "C:\Users\btser\OneDrive\Documents\GitHub\Notes\app.ico"; DestDir: "{app}"
 
 [Icons]
