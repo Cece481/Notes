@@ -4,7 +4,7 @@ Main application entry point for Notes Overlay.
 import sys
 from PyQt6.QtWidgets import QApplication, QMainWindow
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QRect
-from PyQt6.QtGui import QScreen
+from PyQt6.QtGui import QScreen, QKeySequence, QShortcut
 
 import config
 from overlay_button import OverlayButton
@@ -20,6 +20,10 @@ class OverlayMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._is_expanded = False
+        self._is_hidden = False
+        self._button_y = config.BUTTON_TOP_MARGIN
+        self._drag_start_global_y = None
+        self._drag_start_button_y = None
         self._notes_manager = NotesManager()
         self._fullscreen_detector = FullscreenDetector(self._on_fullscreen_change)
         
@@ -27,6 +31,7 @@ class OverlayMainWindow(QMainWindow):
         self._setup_widgets()
         self._setup_animations()
         self._setup_timers()
+        self._setup_shortcuts()
         self._position_widgets()
         self._load_notes()
     
@@ -53,6 +58,9 @@ class OverlayMainWindow(QMainWindow):
         # Create overlay button
         self.button = OverlayButton(self)
         self.button.clicked.connect(self._toggle_expansion)
+        self.button.dragStarted.connect(self._on_button_drag_started)
+        self.button.dragMoved.connect(self._on_button_drag_moved)
+        self.button.dragEnded.connect(self._on_button_drag_ended)
         
         # Create notes window as separate top-level window (initially hidden)
         self.notes_window = NotesWindow()
@@ -94,34 +102,22 @@ class OverlayMainWindow(QMainWindow):
         self._fullscreen_timer.timeout.connect(self._check_fullscreen)
         self._fullscreen_timer.start(config.FULLSCREEN_CHECK_INTERVAL)
     
+    def _setup_shortcuts(self):
+        """Setup keyboard shortcuts."""
+        self._visibility_shortcut = QShortcut(QKeySequence("Ctrl+Alt+N"), self)
+        self._visibility_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._visibility_shortcut.activated.connect(self._toggle_manual_visibility)
+    
     def _position_widgets(self):
         """Position widgets on screen."""
-        screen = QApplication.primaryScreen()
-        screen_geometry = screen.geometry()
-        
-        # Calculate button position (right edge, near top)
-        button_x = screen_geometry.width() - config.BUTTON_WIDTH
-        button_y = config.BUTTON_TOP_MARGIN
-        
-        # Position main window
-        self.move(button_x, button_y)
-        
-        # Position button within main window
-        self.button.move(0, 0)
-        
-        # Notes window will be positioned on screen during expansion
-        notes_x = button_x - config.NOTES_WINDOW_WIDTH
-        notes_y = button_y
-        
-        # Position notes window (initially hidden, off-screen)
-        self.notes_window.setGeometry(
-            notes_x, notes_y,
-            config.NOTES_WINDOW_WIDTH,
-            config.NOTES_WINDOW_HEIGHT
-        )
+        self._button_y = self._clamp_button_position(self._button_y)
+        self._apply_button_position()
+        self._position_notes_window()
     
     def _toggle_expansion(self):
         """Toggle between collapsed and expanded states."""
+        if self._is_hidden:
+            return
         if self._is_expanded:
             self._collapse()
         else:
@@ -139,7 +135,7 @@ class OverlayMainWindow(QMainWindow):
         
         # Calculate positions
         button_x = screen_geometry.width() - config.BUTTON_WIDTH
-        button_y = config.BUTTON_TOP_MARGIN
+        button_y = self._button_y
         notes_x = button_x - config.NOTES_WINDOW_WIDTH
         notes_y = button_y
         
@@ -193,7 +189,7 @@ class OverlayMainWindow(QMainWindow):
         
         # Calculate positions
         button_x = screen_geometry.width() - config.BUTTON_WIDTH
-        button_y = config.BUTTON_TOP_MARGIN
+        button_y = self._button_y
         
         # Animate button back
         button_start = self.button.geometry()
@@ -203,7 +199,7 @@ class OverlayMainWindow(QMainWindow):
         screen = QApplication.primaryScreen()
         screen_geometry = screen.geometry()
         button_x = screen_geometry.width() - config.BUTTON_WIDTH
-        button_y = config.BUTTON_TOP_MARGIN
+        button_y = self._button_y
         
         notes_start = self.notes_window.geometry()
         notes_end = QRect(
@@ -232,6 +228,53 @@ class OverlayMainWindow(QMainWindow):
         
         self._notes_opacity_animation.finished.connect(hide_notes)
     
+    def _apply_button_position(self):
+        """Move the overlay button window to the current Y coordinate."""
+        screen_geometry = QApplication.primaryScreen().geometry()
+        button_x = screen_geometry.width() - config.BUTTON_WIDTH
+        self.move(button_x, self._button_y)
+        self.button.move(0, 0)
+    
+    def _position_notes_window(self):
+        """Align notes window with the button."""
+        screen_geometry = QApplication.primaryScreen().geometry()
+        button_x = screen_geometry.width() - config.BUTTON_WIDTH
+        notes_x = button_x - config.NOTES_WINDOW_WIDTH
+        self.notes_window.setGeometry(
+            notes_x,
+            self._button_y,
+            config.NOTES_WINDOW_WIDTH,
+            config.NOTES_WINDOW_HEIGHT
+        )
+    
+    def _clamp_button_position(self, desired_y: int) -> int:
+        """Keep button within the vertical bounds of the screen."""
+        screen_geometry = QApplication.primaryScreen().geometry()
+        max_y = screen_geometry.height() - config.BUTTON_HEIGHT
+        return max(0, min(max_y, desired_y))
+    
+    def _on_button_drag_started(self, global_y: float):
+        """Store initial positions at the start of a drag."""
+        self._drag_start_global_y = global_y
+        self._drag_start_button_y = self._button_y
+    
+    def _on_button_drag_moved(self, global_y: float):
+        """Update button and notes positions while dragging."""
+        if self._drag_start_global_y is None or self._drag_start_button_y is None:
+            return
+        delta = int(global_y - self._drag_start_global_y)
+        new_y = self._clamp_button_position(self._drag_start_button_y + delta)
+        if new_y == self._button_y:
+            return
+        self._button_y = new_y
+        self._apply_button_position()
+        self._position_notes_window()
+    
+    def _on_button_drag_ended(self):
+        """Reset drag tracking when the drag finishes."""
+        self._drag_start_global_y = None
+        self._drag_start_button_y = None
+    
     def _on_notes_changed(self, content: str):
         """Handle notes content change."""
         self._notes_manager.save_notes(content)
@@ -254,7 +297,7 @@ class OverlayMainWindow(QMainWindow):
                 self.hide()
         else:
             # Show overlay when exiting fullscreen
-            if not self.isVisible():
+            if not self.isVisible() and not self._is_hidden:
                 self.show()
                 # Reposition in case screen resolution changed
                 self._position_widgets()
@@ -270,6 +313,25 @@ class OverlayMainWindow(QMainWindow):
         content = self.notes_window.get_content()
         self._notes_manager.save_notes(content)
         event.accept()
+    
+    def _toggle_manual_visibility(self):
+        """Hide or show the overlay via keyboard shortcut."""
+        if self._is_hidden:
+            self._is_hidden = False
+            self.button.show()
+            self.setWindowOpacity(1.0)
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+            if not self.isVisible():
+                self.show()
+            self._position_widgets()
+        else:
+            self._is_hidden = True
+            if self._is_expanded:
+                self._collapse()
+            self.notes_window.hide()
+            self.button.hide()
+            self.setWindowOpacity(0.0)
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
 
 def main():

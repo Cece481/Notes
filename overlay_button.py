@@ -11,10 +11,12 @@ from theme_manager import ThemeManager
 class OverlayButton(QWidget):
     """Signal emitted when button is clicked."""
     clicked = pyqtSignal()
+    dragStarted = pyqtSignal(float)  # Global Y position when drag begins
+    dragMoved = pyqtSignal(float)    # Current global Y during drag
+    dragEnded = pyqtSignal()         # Drag finished
     """
-    Custom button widget with asymmetric design:
-    - Rounded left side (semi-circle)
-    - Flat right side (flush with screen edge)
+    Custom button widget with rounded rectangle design:
+    - Equal rounded corners for a softer square look
     - Vertical "NOTES" text
     - Windows 11 acrylic blur effect
     """
@@ -24,6 +26,8 @@ class OverlayButton(QWidget):
         self._hover_opacity = config.BUTTON_OPACITY
         self._is_hovered = False
         self._is_pressed = False
+        self._dragging = False
+        self._press_global_pos = None
         
         # Set widget properties
         self.setFixedSize(config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
@@ -72,15 +76,34 @@ class OverlayButton(QWidget):
         """Handle mouse press event."""
         if event.button() == Qt.MouseButton.LeftButton:
             self._is_pressed = True
+            self._dragging = False
+            self._press_global_pos = event.globalPosition()
             self.update()
         super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for drag support."""
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            if self._press_global_pos is None:
+                self._press_global_pos = event.globalPosition()
+            delta_y = abs(event.globalPosition().y() - self._press_global_pos.y())
+            if not self._dragging and delta_y >= 5:
+                self._dragging = True
+                self.dragStarted.emit(self._press_global_pos.y())
+            if self._dragging:
+                self.dragMoved.emit(event.globalPosition().y())
+        super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event):
         """Handle mouse release event."""
         if event.button() == Qt.MouseButton.LeftButton:
             self._is_pressed = False
-            if self.rect().contains(event.pos()):
+            if self._dragging:
+                self._dragging = False
+                self.dragEnded.emit()
+            elif self.rect().contains(event.pos()):
                 self.clicked.emit()
+            self._press_global_pos = None
             self.update()
         super().mouseReleaseEvent(event)
     
@@ -91,47 +114,21 @@ class OverlayButton(QWidget):
         
         width = self.width()
         height = self.height()
-        corner_radius = 12  # Radius for rounded corners on left side
+        corner_radius = 12  # Radius for rounded corners
         
-        # Create the asymmetric path (rounded rectangle with flat right side)
-        # This creates a "half pill" shape: rounded left, flat right
+        # Create rounded rectangle path
         path = QPainterPath()
+        path.addRoundedRect(0.0, 0.0, float(width), float(height), float(corner_radius), float(corner_radius))
         
-        # Start from top-right corner (flat right side)
-        path.moveTo(width, 0)
-        
-        # Draw straight line down the right side
-        path.lineTo(width, height)
-        
-        # Draw rounded bottom-left corner
-        path.arcTo(0, height - corner_radius * 2, corner_radius * 2, corner_radius * 2, 270, 90)
-        
-        # Draw straight line up the left side
-        path.lineTo(0, corner_radius)
-        
-        # Draw rounded top-left corner
-        path.arcTo(0, 0, corner_radius * 2, corner_radius * 2, 180, 90)
-        
-        # Close path back to top-right
-        path.closeSubpath()
-        
-        # Draw shadow on left side only
-        shadow_path = QPainterPath()
-        shadow_path.moveTo(width, 0)
-        shadow_path.lineTo(width, height)
-        shadow_path.arcTo(0, height - corner_radius * 2, corner_radius * 2, corner_radius * 2, 270, 90)
-        shadow_path.lineTo(0, corner_radius)
-        shadow_path.arcTo(0, 0, corner_radius * 2, corner_radius * 2, 180, 90)
-        shadow_path.closeSubpath()
-        
-        # Draw shadow
-        shadow_color = QColor(0, 0, 0, 40)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(shadow_color))
-        shadow_offset = config.BUTTON_SHADOW_OFFSET
-        painter.translate(-shadow_offset, shadow_offset)
-        painter.drawPath(shadow_path)
-        painter.translate(shadow_offset, -shadow_offset)
+        # Draw shadow (uniform)
+        if config.BUTTON_SHADOW_OFFSET:
+            shadow_color = QColor(0, 0, 0, 40)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(shadow_color))
+            shadow_offset = config.BUTTON_SHADOW_OFFSET
+            painter.translate(0, shadow_offset)
+            painter.drawPath(path)
+            painter.translate(0, -shadow_offset)
         
         # Determine background color based on system theme
         bg_color_tuple = ThemeManager.get_bg_color()

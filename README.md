@@ -30,6 +30,8 @@ A modern, elegant notes application that appears as a persistent overlay on your
 
 - **Click the "NOTES" button** on the right side of your screen to expand the notepad
 - **Click again** to collapse it back to the button
+- **Click and drag the button vertically** to reposition it along the screen edge
+- **Press `Ctrl + Alt + N`** to hide or unhide the overlay button at any time
 - **Type your notes** - they are automatically saved
 - The overlay will **automatically hide** when you open a fullscreen application
 - The overlay will **reappear** when you exit fullscreen mode
