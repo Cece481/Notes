@@ -1,6 +1,6 @@
 Things to add
 1. move button right and left side of monitor not on the taskbar. DONE
-2. add tabs for more notes.
+2. add tabs for more notes. 
 3. make optimized to for places at monitor.
 4. change process name to Notes.
 5. add hidden icon right down side of windows task bar.

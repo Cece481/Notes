@@ -1,4 +1,4 @@
-('C:\\Users\\btser\\OneDrive\\Desktop\\Notes-main\\build\\main\\PYZ-00.pyz',
+('C:\\Users\\btser\\OneDrive\\Documents\\GitHub\\Notes\\build\\main\\PYZ-00.pyz',
  [('PyQt6',
    'C:\\Users\\btser\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python313\\site-packages\\PyQt6\\__init__.py',
    'PYMODULE'),
@@ -73,7 +73,7 @@
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\\Lib\\calendar.py',
    'PYMODULE'),
   ('config',
-   'C:\\Users\\btser\\OneDrive\\Desktop\\Notes-main\\config.py',
+   'C:\\Users\\btser\\OneDrive\\Documents\\GitHub\\Notes\\config.py',
    'PYMODULE'),
   ('contextlib',
    'C:\\Program '
@@ -196,7 +196,7 @@
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\\Lib\\fractions.py',
    'PYMODULE'),
   ('fullscreen_detector',
-   'C:\\Users\\btser\\OneDrive\\Desktop\\Notes-main\\fullscreen_detector.py',
+   'C:\\Users\\btser\\OneDrive\\Documents\\GitHub\\Notes\\fullscreen_detector.py',
    'PYMODULE'),
   ('getopt',
    'C:\\Program '
@@ -339,10 +339,10 @@
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\\Lib\\lzma.py',
    'PYMODULE'),
   ('notes_manager',
-   'C:\\Users\\btser\\OneDrive\\Desktop\\Notes-main\\notes_manager.py',
+   'C:\\Users\\btser\\OneDrive\\Documents\\GitHub\\Notes\\notes_manager.py',
    'PYMODULE'),
   ('notes_window',
-   'C:\\Users\\btser\\OneDrive\\Desktop\\Notes-main\\notes_window.py',
+   'C:\\Users\\btser\\OneDrive\\Documents\\GitHub\\Notes\\notes_window.py',
    'PYMODULE'),
   ('numbers',
    'C:\\Program '
@@ -353,7 +353,7 @@
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\\Lib\\opcode.py',
    'PYMODULE'),
   ('overlay_button',
-   'C:\\Users\\btser\\OneDrive\\Desktop\\Notes-main\\overlay_button.py',
+   'C:\\Users\\btser\\OneDrive\\Documents\\GitHub\\Notes\\overlay_button.py',
    'PYMODULE'),
   ('pathlib',
    'C:\\Program '
@@ -436,7 +436,7 @@
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\\Lib\\textwrap.py',
    'PYMODULE'),
   ('theme_manager',
-   'C:\\Users\\btser\\OneDrive\\Desktop\\Notes-main\\theme_manager.py',
+   'C:\\Users\\btser\\OneDrive\\Documents\\GitHub\\Notes\\theme_manager.py',
    'PYMODULE'),
   ('threading',
    'C:\\Program '
