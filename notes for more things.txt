@@ -1,5 +1,5 @@
 Things to add
-1. move button  right and left side of monitor.
+1. move button right and left side of monitor not on the taskbar. DONE
 2. add tabs for more notes.
 3. make optimized to for places at monitor.
 4. change process name to Notes.
@@ -13,3 +13,4 @@ Things to add
 12. auto numbering.
 13. make button more small size.
 14. add opacity, colors and animation change section at settings.
+15. useable for multiple windows.

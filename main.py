@@ -3,8 +3,16 @@ Main application entry point for Notes Overlay.
 """
 import sys
 from PyQt6.QtWidgets import QApplication, QMainWindow
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QRect
-from PyQt6.QtGui import QScreen, QKeySequence, QShortcut
+from PyQt6.QtCore import (
+    Qt,
+    QTimer,
+    QPropertyAnimation,
+    QEasingCurve,
+    QParallelAnimationGroup,
+    QRect,
+    QSettings,
+)
+from PyQt6.QtGui import QScreen, QKeySequence, QShortcut, QCursor
 
 import config
 from overlay_button import OverlayButton
@@ -22,8 +30,11 @@ class OverlayMainWindow(QMainWindow):
         self._is_expanded = False
         self._is_hidden = False
         self._button_y = config.BUTTON_TOP_MARGIN
+        self._button_side = "right"  # "left" or "right"
         self._drag_start_global_y = None
         self._drag_start_button_y = None
+        # Settings for persisting button side preference
+        self._settings = QSettings("NotesOverlay", config.APP_NAME)
         self._notes_manager = NotesManager()
         self._fullscreen_detector = FullscreenDetector(self._on_fullscreen_change)
         
@@ -32,6 +43,7 @@ class OverlayMainWindow(QMainWindow):
         self._setup_animations()
         self._setup_timers()
         self._setup_shortcuts()
+        self._load_button_side()
         self._position_widgets()
         self._load_notes()
     
@@ -78,6 +90,12 @@ class OverlayMainWindow(QMainWindow):
         self._button_animation = QPropertyAnimation(self.button, b"geometry")
         self._button_animation.setDuration(config.ANIMATION_DURATION)
         self._button_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        # Snap animation for the overlay window (button container)
+        self._snap_animation = QPropertyAnimation(self, b"pos")
+        self._snap_animation.setDuration(config.ANIMATION_DURATION)
+        self._snap_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._snap_animation.finished.connect(self._position_notes_window)
         
         # Notes window opacity animation
         self._notes_opacity_animation = QPropertyAnimation(self.notes_window, b"windowOpacity")
@@ -113,6 +131,18 @@ class OverlayMainWindow(QMainWindow):
         self._button_y = self._clamp_button_position(self._button_y)
         self._apply_button_position()
         self._position_notes_window()
+
+    def _load_button_side(self):
+        """Load persisted button side (left/right)."""
+        side = self._settings.value("button_side", "right")
+        if side in ("left", "right"):
+            self._button_side = side
+        else:
+            self._button_side = "right"
+
+    def _save_button_side(self):
+        """Persist current button side."""
+        self._settings.setValue("button_side", self._button_side)
     
     def _toggle_expansion(self):
         """Toggle between collapsed and expanded states."""
@@ -132,12 +162,16 @@ class OverlayMainWindow(QMainWindow):
         
         screen = QApplication.primaryScreen()
         screen_geometry = screen.geometry()
-        
-        # Calculate positions
-        button_x = screen_geometry.width() - config.BUTTON_WIDTH
-        button_y = self._button_y
-        notes_x = button_x - config.NOTES_WINDOW_WIDTH
-        notes_y = button_y
+        screen_width = screen_geometry.width()
+
+        # Calculate button X based on side (do NOT move the button vertically)
+        if self._button_side == "right":
+            button_x = screen_width - config.BUTTON_WIDTH
+        else:
+            button_x = 0
+
+        # Target geometry for notes window that keeps it on-screen
+        notes_target_geom = self._compute_notes_target_geometry()
         
         # Show notes window
         self.notes_window.setWindowOpacity(0.0)
@@ -150,15 +184,11 @@ class OverlayMainWindow(QMainWindow):
         # Animate notes window (fade in and slide from right)
         # Notes window is positioned on screen coordinates
         notes_start = QRect(
-            button_x, notes_y,
+            button_x, notes_target_geom.y(),
             config.NOTES_WINDOW_WIDTH,
             config.NOTES_WINDOW_HEIGHT
         )
-        notes_end = QRect(
-            notes_x, notes_y,
-            config.NOTES_WINDOW_WIDTH,
-            config.NOTES_WINDOW_HEIGHT
-        )
+        notes_end = notes_target_geom
         
         # Main window stays the same size (only button window)
         # Don't animate main window for now - it stays button-sized
@@ -186,24 +216,25 @@ class OverlayMainWindow(QMainWindow):
         
         screen = QApplication.primaryScreen()
         screen_geometry = screen.geometry()
-        
-        # Calculate positions
-        button_x = screen_geometry.width() - config.BUTTON_WIDTH
+        screen_width = screen_geometry.width()
+
+        # Calculate positions based on which side the button is on
+        if self._button_side == "right":
+            button_x = screen_width - config.BUTTON_WIDTH
+            notes_end_x = button_x
+        else:
+            button_x = 0
+            notes_end_x = button_x - config.NOTES_WINDOW_WIDTH
+
         button_y = self._button_y
         
         # Animate button back
         button_start = self.button.geometry()
         button_end = QRect(0, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
         
-        # Animate notes window (fade out and slide to right)
-        screen = QApplication.primaryScreen()
-        screen_geometry = screen.geometry()
-        button_x = screen_geometry.width() - config.BUTTON_WIDTH
-        button_y = self._button_y
-        
         notes_start = self.notes_window.geometry()
         notes_end = QRect(
-            button_x, button_y,
+            notes_end_x, button_y,
             config.NOTES_WINDOW_WIDTH,
             config.NOTES_WINDOW_HEIGHT
         )
@@ -228,30 +259,99 @@ class OverlayMainWindow(QMainWindow):
         
         self._notes_opacity_animation.finished.connect(hide_notes)
     
+    def _get_work_area_rect(self) -> QRect:
+        """
+        Get the usable work area of the primary screen (excluding taskbar)
+        as a QRect. Falls back to Qt's availableGeometry if win32 APIs are
+        unavailable.
+        """
+        screen = QApplication.primaryScreen()
+        try:
+            import win32api  # type: ignore
+            import win32con  # type: ignore
+
+            # Returns (left, top, right, bottom)
+            left, top, right, bottom = win32api.SystemParametersInfo(
+                win32con.SPI_GETWORKAREA
+            )
+            return QRect(left, top, right - left, bottom - top)
+        except Exception:
+            # Fallback: Qt's availableGeometry already excludes taskbar in most cases
+            return screen.availableGeometry()
+
     def _apply_button_position(self):
-        """Move the overlay button window to the current Y coordinate."""
-        screen_geometry = QApplication.primaryScreen().geometry()
-        button_x = screen_geometry.width() - config.BUTTON_WIDTH
+        """Move the overlay button window to the current Y coordinate within work area."""
+        work_rect = self._get_work_area_rect()
+        if self._button_side == "right":
+            button_x = work_rect.right() - config.BUTTON_WIDTH
+        else:
+            button_x = work_rect.left()
+        # Ensure current Y is clamped to work area
+        self._button_y = self._clamp_button_position(self._button_y)
         self.move(button_x, self._button_y)
         self.button.move(0, 0)
-    
-    def _position_notes_window(self):
-        """Align notes window with the button."""
-        screen_geometry = QApplication.primaryScreen().geometry()
-        button_x = screen_geometry.width() - config.BUTTON_WIDTH
-        notes_x = button_x - config.NOTES_WINDOW_WIDTH
-        self.notes_window.setGeometry(
-            notes_x,
-            self._button_y,
-            config.NOTES_WINDOW_WIDTH,
-            config.NOTES_WINDOW_HEIGHT
+
+    def _compute_notes_target_geometry(self):
+        """
+        Compute a notes window geometry that keeps it fully on-screen and
+        positioned next to the button.
+        Default: open below the button; if there isn't enough space below,
+        open above instead.
+        """
+        work_rect = self._get_work_area_rect()
+        screen_width = work_rect.width()
+        screen_height = work_rect.height()
+
+        # Button position and size – use the overlay window's actual X
+        # so the notes window sits directly flush against the button.
+        button_x = self.x()
+        button_y = self._button_y
+        button_top = button_y
+        button_bottom = button_y + config.BUTTON_HEIGHT
+
+        # Available vertical space within work area
+        space_above = button_top - work_rect.top()
+        space_below = work_rect.bottom() - button_bottom
+
+        # Decide whether to show notes above or below the button
+        if space_below < config.NOTES_WINDOW_HEIGHT:
+            # Not enough space below; show entirely above the button
+            notes_y = max(work_rect.top(), button_top - config.NOTES_WINDOW_HEIGHT + config.BUTTON_HEIGHT)
+        else:
+            # Default: place top of notes at the bottom of the button, clamped to screen
+            notes_y = min(
+                button_bottom - config.BUTTON_HEIGHT, work_rect.bottom() - config.NOTES_WINDOW_HEIGHT
+            )
+
+        # Horizontal positioning based on button side
+        if self._button_side == "right":
+            preferred_x = button_x - config.NOTES_WINDOW_WIDTH
+        else:
+            preferred_x = button_x + config.BUTTON_WIDTH
+
+        # Clamp horizontally so window stays fully within work area
+        notes_x = max(
+            work_rect.left(),
+            min(work_rect.right() - config.NOTES_WINDOW_WIDTH, preferred_x),
         )
+
+        return QRect(
+            notes_x,
+            notes_y,
+            config.NOTES_WINDOW_WIDTH,
+            config.NOTES_WINDOW_HEIGHT,
+        )
+
+    def _position_notes_window(self):
+        """Align notes window with the button, keeping it fully on-screen."""
+        target_geom = self._compute_notes_target_geometry()
+        self.notes_window.setGeometry(target_geom)
     
     def _clamp_button_position(self, desired_y: int) -> int:
         """Keep button within the vertical bounds of the screen."""
-        screen_geometry = QApplication.primaryScreen().geometry()
-        max_y = screen_geometry.height() - config.BUTTON_HEIGHT
-        return max(0, min(max_y, desired_y))
+        work_rect = self._get_work_area_rect()
+        max_y = work_rect.bottom() - config.BUTTON_HEIGHT
+        return max(work_rect.top(), min(max_y, desired_y))
     
     def _on_button_drag_started(self, global_y: float):
         """Store initial positions at the start of a drag."""
@@ -262,18 +362,58 @@ class OverlayMainWindow(QMainWindow):
         """Update button and notes positions while dragging."""
         if self._drag_start_global_y is None or self._drag_start_button_y is None:
             return
+        # Vertical movement (unchanged)
         delta = int(global_y - self._drag_start_global_y)
         new_y = self._clamp_button_position(self._drag_start_button_y + delta)
-        if new_y == self._button_y:
-            return
         self._button_y = new_y
-        self._apply_button_position()
+
+        # Horizontal movement follows the cursor during drag, constrained to work area
+        cursor_pos = QCursor.pos()
+        work_rect = self._get_work_area_rect()
+        # Center button on cursor X while keeping it inside work area
+        tentative_x = int(cursor_pos.x() - config.BUTTON_WIDTH / 2)
+        tentative_x = max(
+            work_rect.left(),
+            min(work_rect.right() - config.BUTTON_WIDTH, tentative_x),
+        )
+        self.move(tentative_x, self._button_y)
+        self.button.move(0, 0)
         self._position_notes_window()
     
     def _on_button_drag_ended(self):
         """Reset drag tracking when the drag finishes."""
         self._drag_start_global_y = None
         self._drag_start_button_y = None
+
+        # Decide which side to snap to based on final horizontal position
+        work_rect = self._get_work_area_rect()
+        center_x = work_rect.left() + (work_rect.width() / 2)
+        button_center_x = self.x() + (config.BUTTON_WIDTH / 2)
+
+        if button_center_x < center_x:
+            self._button_side = "left"
+        else:
+            self._button_side = "right"
+
+        self._save_button_side()
+        self._snap_button_to_current_side()
+
+    def _snap_button_to_current_side(self):
+        """Animate button snapping to the nearest screen edge while keeping Y."""
+        work_rect = self._get_work_area_rect()
+        if self._button_side == "right":
+            target_x = work_rect.right() - config.BUTTON_WIDTH
+        else:
+            target_x = work_rect.left()
+
+        start_pos = self.pos()
+        end_pos = start_pos
+        end_pos.setX(int(target_x))
+
+        self._snap_animation.stop()
+        self._snap_animation.setStartValue(start_pos)
+        self._snap_animation.setEndValue(end_pos)
+        self._snap_animation.start()
     
     def _on_notes_changed(self, content: str):
         """Handle notes content change."""
