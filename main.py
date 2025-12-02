@@ -89,11 +89,15 @@ class OverlayMainWindow(QMainWindow):
         """Setup system tray icon with context menu."""
         # Load icon from app.ico file in the same folder as main.py
         import os
-        icon_path = os.path.join(os.path.dirname(__file__), "app.ico")
+        
+        # Get the directory where main.py is located
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(current_dir, "app.ico")
         
         # Try to load the icon file, fall back to generated icon if file not found
         if os.path.exists(icon_path):
             icon = QIcon(icon_path)
+            print(f"Loaded icon from: {icon_path}")
         else:
             print(f"Warning: app.ico not found at {icon_path}, using generated icon")
             icon = self._create_tray_icon()
