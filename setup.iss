@@ -1,6 +1,6 @@
 [Setup]
 AppName=NotesOverlay
-AppVersion=1.4
+AppVersion=1.6
 DefaultDirName={pf}\NotesOverlay
 OutputDir=C:\Users\btser\OneDrive\Documents\GitHub\Notes\dist
 OutputBaseFilename=NotesOverlay_Setup
