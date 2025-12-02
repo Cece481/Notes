@@ -259,35 +259,13 @@ class OverlayMainWindow(QMainWindow):
         
         self._notes_opacity_animation.finished.connect(hide_notes)
     
-    def _get_work_area_rect(self) -> QRect:
-        """
-        Get the usable work area of the primary screen (excluding taskbar)
-        as a QRect. Falls back to Qt's availableGeometry if win32 APIs are
-        unavailable.
-        """
-        screen = QApplication.primaryScreen()
-        try:
-            import win32api  # type: ignore
-            import win32con  # type: ignore
-
-            # Returns (left, top, right, bottom)
-            left, top, right, bottom = win32api.SystemParametersInfo(
-                win32con.SPI_GETWORKAREA
-            )
-            return QRect(left, top, right - left, bottom - top)
-        except Exception:
-            # Fallback: Qt's availableGeometry already excludes taskbar in most cases
-            return screen.availableGeometry()
-
     def _apply_button_position(self):
-        """Move the overlay button window to the current Y coordinate within work area."""
-        work_rect = self._get_work_area_rect()
+        """Move the overlay button window to the current Y coordinate."""
+        screen_geometry = QApplication.primaryScreen().geometry()
         if self._button_side == "right":
-            button_x = work_rect.right() - config.BUTTON_WIDTH
+            button_x = screen_geometry.width() - config.BUTTON_WIDTH
         else:
-            button_x = work_rect.left()
-        # Ensure current Y is clamped to work area
-        self._button_y = self._clamp_button_position(self._button_y)
+            button_x = 0
         self.move(button_x, self._button_y)
         self.button.move(0, 0)
 
@@ -298,30 +276,30 @@ class OverlayMainWindow(QMainWindow):
         Default: open below the button; if there isn't enough space below,
         open above instead.
         """
-        work_rect = self._get_work_area_rect()
-        screen_width = work_rect.width()
-        screen_height = work_rect.height()
+        screen_geometry = QApplication.primaryScreen().geometry()
+        screen_width = screen_geometry.width()
+        screen_height = screen_geometry.height()
 
-        # Button position and size – use the overlay window's actual X
-        # so the notes window sits directly flush against the button.
-        button_x = self.x()
+        # Button position and size
+        if self._button_side == "right":
+            button_x = screen_width - config.BUTTON_WIDTH
+        else:
+            button_x = 0
         button_y = self._button_y
         button_top = button_y
         button_bottom = button_y + config.BUTTON_HEIGHT
 
-        # Available vertical space within work area
-        space_above = button_top - work_rect.top()
-        space_below = work_rect.bottom() - button_bottom
+        # Available vertical space
+        space_above = button_top
+        space_below = screen_height - button_bottom
 
         # Decide whether to show notes above or below the button
         if space_below < config.NOTES_WINDOW_HEIGHT:
             # Not enough space below; show entirely above the button
-            notes_y = max(work_rect.top(), button_top - config.NOTES_WINDOW_HEIGHT + config.BUTTON_HEIGHT)
+            notes_y = max(0, button_top - (config.NOTES_WINDOW_HEIGHT - config.BUTTON_HEIGHT))
         else:
             # Default: place top of notes at the bottom of the button, clamped to screen
-            notes_y = min(
-                button_bottom - config.BUTTON_HEIGHT, work_rect.bottom() - config.NOTES_WINDOW_HEIGHT
-            )
+            notes_y = min(button_bottom - config.BUTTON_HEIGHT, screen_height - config.NOTES_WINDOW_HEIGHT)
 
         # Horizontal positioning based on button side
         if self._button_side == "right":
@@ -329,11 +307,8 @@ class OverlayMainWindow(QMainWindow):
         else:
             preferred_x = button_x + config.BUTTON_WIDTH
 
-        # Clamp horizontally so window stays fully within work area
-        notes_x = max(
-            work_rect.left(),
-            min(work_rect.right() - config.NOTES_WINDOW_WIDTH, preferred_x),
-        )
+        # Clamp horizontally so window stays fully on-screen
+        notes_x = max(0, min(screen_width - config.NOTES_WINDOW_WIDTH, preferred_x))
 
         return QRect(
             notes_x,
@@ -349,9 +324,9 @@ class OverlayMainWindow(QMainWindow):
     
     def _clamp_button_position(self, desired_y: int) -> int:
         """Keep button within the vertical bounds of the screen."""
-        work_rect = self._get_work_area_rect()
-        max_y = work_rect.bottom() - config.BUTTON_HEIGHT
-        return max(work_rect.top(), min(max_y, desired_y))
+        screen_geometry = QApplication.primaryScreen().geometry()
+        max_y = screen_geometry.height() - config.BUTTON_HEIGHT
+        return max(0, min(max_y, desired_y))
     
     def _on_button_drag_started(self, global_y: float):
         """Store initial positions at the start of a drag."""
@@ -367,15 +342,13 @@ class OverlayMainWindow(QMainWindow):
         new_y = self._clamp_button_position(self._drag_start_button_y + delta)
         self._button_y = new_y
 
-        # Horizontal movement follows the cursor during drag, constrained to work area
+        # Horizontal movement follows the cursor during drag
         cursor_pos = QCursor.pos()
-        work_rect = self._get_work_area_rect()
-        # Center button on cursor X while keeping it inside work area
+        screen_geometry = QApplication.primaryScreen().geometry()
+        screen_width = screen_geometry.width()
+        # Center button on cursor X while keeping it on-screen
         tentative_x = int(cursor_pos.x() - config.BUTTON_WIDTH / 2)
-        tentative_x = max(
-            work_rect.left(),
-            min(work_rect.right() - config.BUTTON_WIDTH, tentative_x),
-        )
+        tentative_x = max(0, min(screen_width - config.BUTTON_WIDTH, tentative_x))
         self.move(tentative_x, self._button_y)
         self.button.move(0, 0)
         self._position_notes_window()
@@ -386,8 +359,9 @@ class OverlayMainWindow(QMainWindow):
         self._drag_start_button_y = None
 
         # Decide which side to snap to based on final horizontal position
-        work_rect = self._get_work_area_rect()
-        center_x = work_rect.left() + (work_rect.width() / 2)
+        screen_geometry = QApplication.primaryScreen().geometry()
+        screen_width = screen_geometry.width()
+        center_x = screen_width / 2
         button_center_x = self.x() + (config.BUTTON_WIDTH / 2)
 
         if button_center_x < center_x:
@@ -400,11 +374,11 @@ class OverlayMainWindow(QMainWindow):
 
     def _snap_button_to_current_side(self):
         """Animate button snapping to the nearest screen edge while keeping Y."""
-        work_rect = self._get_work_area_rect()
+        screen_geometry = QApplication.primaryScreen().geometry()
         if self._button_side == "right":
-            target_x = work_rect.right() - config.BUTTON_WIDTH
+            target_x = screen_geometry.width() - config.BUTTON_WIDTH
         else:
-            target_x = work_rect.left()
+            target_x = 0
 
         start_pos = self.pos()
         end_pos = start_pos
