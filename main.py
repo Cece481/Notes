@@ -2,7 +2,7 @@
 Main application entry point for Notes Overlay.
 """
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow
+from PyQt6.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu
 from PyQt6.QtCore import (
     Qt,
     QTimer,
@@ -12,7 +12,7 @@ from PyQt6.QtCore import (
     QRect,
     QSettings,
 )
-from PyQt6.QtGui import QScreen, QKeySequence, QShortcut, QCursor
+from PyQt6.QtGui import QScreen, QKeySequence, QShortcut, QCursor, QIcon, QPixmap, QPainter, QColor
 
 import config
 from overlay_button import OverlayButton
@@ -43,6 +43,7 @@ class OverlayMainWindow(QMainWindow):
         self._setup_animations()
         self._setup_timers()
         self._setup_shortcuts()
+        self._setup_system_tray()
         self._load_button_side()
         self._position_widgets()
         self._load_notes()
@@ -83,6 +84,97 @@ class OverlayMainWindow(QMainWindow):
         )
         self.notes_window.content_changed.connect(self._on_notes_changed)
         self.notes_window.hide()
+    
+    def _setup_system_tray(self):
+        """Setup system tray icon with context menu."""
+        # Load icon from app.ico file in the same folder as main.py
+        import os
+        icon_path = os.path.join(os.path.dirname(__file__), "app.ico")
+        
+        # Try to load the icon file, fall back to generated icon if file not found
+        if os.path.exists(icon_path):
+            icon = QIcon(icon_path)
+        else:
+            print(f"Warning: app.ico not found at {icon_path}, using generated icon")
+            icon = self._create_tray_icon()
+        
+        # Create system tray icon
+        self.tray_icon = QSystemTrayIcon(icon, self)
+        
+        # Create context menu
+        tray_menu = QMenu()
+        
+        # Add Show/Hide action
+        self.show_hide_action = tray_menu.addAction("Show/Hide Overlay")
+        self.show_hide_action.triggered.connect(self._toggle_manual_visibility)
+        
+        # Add separator
+        tray_menu.addSeparator()
+        
+        # Add Exit action
+        exit_action = tray_menu.addAction("Exit")
+        exit_action.triggered.connect(self._exit_application)
+        
+        # Set the menu to the tray icon
+        self.tray_icon.setContextMenu(tray_menu)
+        
+        # Optional: Add double-click functionality
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        
+        # Show the tray icon
+        self.tray_icon.show()
+        
+        # Show a message when the app starts (optional)
+        self.tray_icon.showMessage(
+            "Notes Overlay",
+            "Application is running in the system tray.\nPress Ctrl+Alt+N to toggle visibility.",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000
+        )
+    
+    def _create_tray_icon(self):
+        """Create a simple tray icon programmatically."""
+        # Create a 64x64 pixmap with a simple icon design
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw a simple notepad icon
+        # Background
+        painter.setBrush(QColor(70, 130, 180))
+        painter.setPen(QColor(50, 100, 150))
+        painter.drawRoundedRect(12, 8, 40, 48, 4, 4)
+        
+        # Lines to represent text
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawLine(18, 20, 46, 20)
+        painter.drawLine(18, 28, 46, 28)
+        painter.drawLine(18, 36, 40, 36)
+        painter.drawLine(18, 44, 46, 44)
+        
+        painter.end()
+        
+        return QIcon(pixmap)
+    
+    def _on_tray_activated(self, reason):
+        """Handle system tray icon activation (clicks)."""
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            # Double-click to toggle visibility
+            self._toggle_manual_visibility()
+    
+    def _exit_application(self):
+        """Exit the application completely."""
+        # Save notes before exiting
+        content = self.notes_window.get_content()
+        self._notes_manager.save_notes(content)
+        
+        # Hide tray icon
+        self.tray_icon.hide()
+        
+        # Quit the application
+        QApplication.quit()
     
     def _setup_animations(self):
         """Setup expansion/collapse animations."""
@@ -325,7 +417,7 @@ class OverlayMainWindow(QMainWindow):
     def _clamp_button_position(self, desired_y: int) -> int:
         """Keep button within the vertical bounds of the screen."""
         screen_geometry = QApplication.primaryScreen().availableGeometry()
-        max_y = screen_geometry.height() - config.BUTTON_HEIGHT ################################################
+        max_y = screen_geometry.height() - config.BUTTON_HEIGHT
         return max(0, min(max_y, desired_y))
     
     def _on_button_drag_started(self, global_y: float):
@@ -423,10 +515,22 @@ class OverlayMainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """Handle window close event."""
-        # Save notes before closing
-        content = self.notes_window.get_content()
-        self._notes_manager.save_notes(content)
-        event.accept()
+        # Instead of closing, just hide to system tray
+        if self.tray_icon.isVisible():
+            event.ignore()
+            self.hide()
+            self.notes_window.hide()
+            self.tray_icon.showMessage(
+                "Notes Overlay",
+                "Application minimized to tray. Right-click the tray icon to exit.",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000
+            )
+        else:
+            # If tray icon is not visible, allow close
+            content = self.notes_window.get_content()
+            self._notes_manager.save_notes(content)
+            event.accept()
     
     def _toggle_manual_visibility(self):
         """Hide or show the overlay via keyboard shortcut."""
@@ -453,6 +557,9 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(config.APP_NAME)
     
+    # Prevent application from quitting when main window is closed
+    app.setQuitOnLastWindowClosed(False)
+    
     # High DPI scaling is enabled by default in PyQt6
     # No need to set AA_EnableHighDpiScaling or AA_UseHighDpiPixmaps
     
@@ -464,4 +571,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
