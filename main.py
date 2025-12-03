@@ -31,6 +31,7 @@ class OverlayMainWindow(QMainWindow):
         self._is_hidden = False
         self._button_y = config.BUTTON_TOP_MARGIN
         self._button_side = "right"  # "left" or "right"
+        self._current_screen = None  # Track which screen the button is on
         self._drag_start_global_y = None
         self._drag_start_button_y = None
         # Settings for persisting button side preference
@@ -44,10 +45,13 @@ class OverlayMainWindow(QMainWindow):
         self._setup_timers()
         self._setup_system_tray()
         self._load_button_side()
+        self._detect_current_screen()  # Detect which screen button is on
         self._position_widgets()
         self._load_notes()
         # Setup shortcuts AFTER everything else is initialized
         self._setup_shortcuts()
+        # Monitor screen changes
+        self._setup_screen_monitoring()
     
     def _setup_window(self):
         """Configure the main window properties."""
@@ -229,9 +233,55 @@ class OverlayMainWindow(QMainWindow):
         self._visibility_shortcut_notes.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self._visibility_shortcut_notes.activated.connect(self._toggle_manual_visibility)
     
+    def _setup_screen_monitoring(self):
+        """Setup monitoring for screen configuration changes."""
+        # Connect to screen added/removed signals
+        app = QApplication.instance()
+        app.screenAdded.connect(self._on_screen_configuration_changed)
+        app.screenRemoved.connect(self._on_screen_configuration_changed)
+        
+        # Monitor primary screen changes
+        app.primaryScreenChanged.connect(self._on_screen_configuration_changed)
+    
+    def _detect_current_screen(self):
+        """Detect which screen the button is currently on."""
+        button_center = self.geometry().center()
+        
+        for screen in QApplication.screens():
+            if screen.geometry().contains(button_center):
+                self._current_screen = screen
+                return
+        
+        # Fallback to primary screen if not found
+        self._current_screen = QApplication.primaryScreen()
+    
+    def _get_current_screen(self):
+        """Get the screen that the button is currently on."""
+        if self._current_screen is None:
+            self._detect_current_screen()
+        return self._current_screen
+    
+    def _on_screen_configuration_changed(self, screen=None):
+        """Handle screen configuration changes (added/removed/changed)."""
+        # Re-detect current screen
+        self._detect_current_screen()
+        
+        # Reposition widgets to ensure they're still on a valid screen
+        self._position_widgets()
+        
+        # If expanded, reposition notes window as well
+        if self._is_expanded:
+            self._position_notes_window()
+    
     def _position_widgets(self):
         """Position widgets on screen."""
-        self._button_y = self._clamp_button_position(self._button_y)
+        screen = self._get_current_screen()
+        screen_geometry = screen.geometry()
+        
+        # Clamp button position to current screen bounds
+        max_y = screen_geometry.height() - config.BUTTON_HEIGHT
+        self._button_y = max(0, min(max_y, self._button_y))
+        
         self._apply_button_position()
         self._position_notes_window()
 
@@ -263,15 +313,15 @@ class OverlayMainWindow(QMainWindow):
         
         self._is_expanded = True
         
-        screen = QApplication.primaryScreen()
+        screen = self._get_current_screen()
         screen_geometry = screen.geometry()
         screen_width = screen_geometry.width()
 
         # Calculate button X based on side (do NOT move the button vertically)
         if self._button_side == "right":
-            button_x = screen_width - config.BUTTON_WIDTH
+            button_x = screen_geometry.x() + screen_width - config.BUTTON_WIDTH
         else:
-            button_x = 0
+            button_x = screen_geometry.x()
 
         # Target geometry for notes window that keeps it on-screen
         notes_target_geom = self._compute_notes_target_geometry()
@@ -322,16 +372,16 @@ class OverlayMainWindow(QMainWindow):
         
         self._is_expanded = False
         
-        screen = QApplication.primaryScreen()
+        screen = self._get_current_screen()
         screen_geometry = screen.geometry()
         screen_width = screen_geometry.width()
 
         # Calculate positions based on which side the button is on
         if self._button_side == "right":
-            button_x = screen_width - config.BUTTON_WIDTH
+            button_x = screen_geometry.x() + screen_width - config.BUTTON_WIDTH
             notes_end_x = button_x
         else:
-            button_x = 0
+            button_x = screen_geometry.x()
             notes_end_x = button_x - config.NOTES_WINDOW_WIDTH
 
         button_y = self._button_y
@@ -369,12 +419,15 @@ class OverlayMainWindow(QMainWindow):
     
     def _apply_button_position(self):
         """Move the overlay button window to the current Y coordinate."""
-        screen_geometry = QApplication.primaryScreen().geometry()
+        screen = self._get_current_screen()
+        screen_geometry = screen.geometry()
+        
         if self._button_side == "right":
-            button_x = screen_geometry.width() - config.BUTTON_WIDTH
+            button_x = screen_geometry.x() + screen_geometry.width() - config.BUTTON_WIDTH
         else:
-            button_x = 0
-        self.move(button_x, self._button_y)
+            button_x = screen_geometry.x()
+        
+        self.move(button_x, screen_geometry.y() + self._button_y)
         self.button.move(0, 0)
 
     def _compute_notes_target_geometry(self):
@@ -384,30 +437,32 @@ class OverlayMainWindow(QMainWindow):
         Default: open below the button; if there isn't enough space below,
         open above instead.
         """
-        screen_geometry = QApplication.primaryScreen().geometry()
+        screen = self._get_current_screen()
+        screen_geometry = screen.geometry()
         screen_width = screen_geometry.width()
         screen_height = screen_geometry.height()
 
-        # Button position and size
+        # Button position and size (relative to current screen)
         if self._button_side == "right":
-            button_x = screen_width - config.BUTTON_WIDTH
+            button_x = screen_geometry.x() + screen_width - config.BUTTON_WIDTH
         else:
-            button_x = 0
-        button_y = self._button_y
+            button_x = screen_geometry.x()
+        button_y = screen_geometry.y() + self._button_y
         button_top = button_y
         button_bottom = button_y + config.BUTTON_HEIGHT
 
-        # Available vertical space
-        space_above = button_top
-        space_below = screen_height - button_bottom
+        # Available vertical space (relative to current screen)
+        space_above = self._button_y
+        space_below = screen_height - (self._button_y + config.BUTTON_HEIGHT)
 
         # Decide whether to show notes above or below the button
         if space_below < config.NOTES_WINDOW_HEIGHT:
             # Not enough space below; show entirely above the button
-            notes_y = max(0, button_top - (config.NOTES_WINDOW_HEIGHT - config.BUTTON_HEIGHT))
+            notes_y = max(screen_geometry.y(), button_top - (config.NOTES_WINDOW_HEIGHT - config.BUTTON_HEIGHT))
         else:
             # Default: place top of notes at the bottom of the button, clamped to screen
-            notes_y = min(button_bottom - config.BUTTON_HEIGHT, screen_height - config.NOTES_WINDOW_HEIGHT)
+            notes_y = min(button_bottom - config.BUTTON_HEIGHT, 
+                         screen_geometry.y() + screen_height - config.NOTES_WINDOW_HEIGHT)
 
         # Horizontal positioning based on button side
         if self._button_side == "right":
@@ -415,8 +470,9 @@ class OverlayMainWindow(QMainWindow):
         else:
             preferred_x = button_x + config.BUTTON_WIDTH
 
-        # Clamp horizontally so window stays fully on-screen
-        notes_x = max(0, min(screen_width - config.NOTES_WINDOW_WIDTH, preferred_x))
+        # Clamp horizontally so window stays fully on current screen
+        notes_x = max(screen_geometry.x(), 
+                     min(screen_geometry.x() + screen_width - config.NOTES_WINDOW_WIDTH, preferred_x))
 
         return QRect(
             notes_x,
@@ -431,8 +487,9 @@ class OverlayMainWindow(QMainWindow):
         self.notes_window.setGeometry(target_geom)
     
     def _clamp_button_position(self, desired_y: int) -> int:
-        """Keep button within the vertical bounds of the screen."""
-        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        """Keep button within the vertical bounds of the current screen."""
+        screen = self._get_current_screen()
+        screen_geometry = screen.availableGeometry()
         max_y = screen_geometry.height() - config.BUTTON_HEIGHT
         return max(0, min(max_y, desired_y))
     
@@ -445,19 +502,32 @@ class OverlayMainWindow(QMainWindow):
         """Update button and notes positions while dragging."""
         if self._drag_start_global_y is None or self._drag_start_button_y is None:
             return
-        # Vertical movement (unchanged)
+        
+        # Get cursor position to detect which screen we're on
+        cursor_pos = QCursor.pos()
+        
+        # Detect which screen the cursor is currently on
+        for screen in QApplication.screens():
+            if screen.geometry().contains(cursor_pos):
+                self._current_screen = screen
+                break
+        
+        screen_geometry = self._get_current_screen().geometry()
+        screen_width = screen_geometry.width()
+        screen_height = screen_geometry.height()
+        
+        # Vertical movement (adjusted for screen position)
         delta = int(global_y - self._drag_start_global_y)
         new_y = self._clamp_button_position(self._drag_start_button_y + delta)
         self._button_y = new_y
 
         # Horizontal movement follows the cursor during drag
-        cursor_pos = QCursor.pos()
-        screen_geometry = QApplication.primaryScreen().geometry()
-        screen_width = screen_geometry.width()
-        # Center button on cursor X while keeping it on-screen
+        # Center button on cursor X while keeping it on current screen
         tentative_x = int(cursor_pos.x() - config.BUTTON_WIDTH / 2)
-        tentative_x = max(0, min(screen_width - config.BUTTON_WIDTH, tentative_x))
-        self.move(tentative_x, self._button_y)
+        tentative_x = max(screen_geometry.x(), 
+                         min(screen_geometry.x() + screen_width - config.BUTTON_WIDTH, tentative_x))
+        
+        self.move(tentative_x, screen_geometry.y() + self._button_y)
         self.button.move(0, 0)
         self._position_notes_window()
     
@@ -466,13 +536,13 @@ class OverlayMainWindow(QMainWindow):
         self._drag_start_global_y = None
         self._drag_start_button_y = None
 
-        # Decide which side to snap to based on final horizontal position
-        screen_geometry = QApplication.primaryScreen().geometry()
-        screen_width = screen_geometry.width()
-        center_x = screen_width / 2
+        # Decide which side to snap to based on final horizontal position on current screen
+        screen = self._get_current_screen()
+        screen_geometry = screen.geometry()
+        screen_center_x = screen_geometry.x() + (screen_geometry.width() / 2)
         button_center_x = self.x() + (config.BUTTON_WIDTH / 2)
 
-        if button_center_x < center_x:
+        if button_center_x < screen_center_x:
             self._button_side = "left"
         else:
             self._button_side = "right"
@@ -482,11 +552,13 @@ class OverlayMainWindow(QMainWindow):
 
     def _snap_button_to_current_side(self):
         """Animate button snapping to the nearest screen edge while keeping Y."""
-        screen_geometry = QApplication.primaryScreen().geometry()
+        screen = self._get_current_screen()
+        screen_geometry = screen.geometry()
+        
         if self._button_side == "right":
-            target_x = screen_geometry.width() - config.BUTTON_WIDTH
+            target_x = screen_geometry.x() + screen_geometry.width() - config.BUTTON_WIDTH
         else:
-            target_x = 0
+            target_x = screen_geometry.x()
 
         start_pos = self.pos()
         end_pos = start_pos
