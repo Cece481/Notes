@@ -22,7 +22,7 @@ Add options to change text color and size.
 
 Add automatic numbering for notes.
 
-Reduce the size of the main button.
+Reduce the size of the main button. (Done)
 
 Add settings for opacity, colors, and animation effects.
 
