@@ -4,7 +4,7 @@ Move the button to the left and right sides of the monitor instead of the taskba
 
 Add tabs to allow multiple notes. (Done)
 
-Optimize positioning for different monitor layouts.
+Optimize positioning for different monitor layouts. (Done)
 
 Add a hidden icon in the lower-right area of the Windows taskbar. (Done)
 
@@ -14,9 +14,9 @@ Add a Settings panel to change themes or create custom themes.
 
 Enable automatic updates from GitHub.
 
-Run it as a regular app instead of a background process.
+Run it as a regular app instead of a background process. (No need)
 
-Prevent the button from shifting to the left when clicked.
+Prevent the button from shifting to the left when clicked.(Done)
 
 Add options to change text color and size.
 

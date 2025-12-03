@@ -280,11 +280,16 @@ class OverlayMainWindow(QMainWindow):
         self.notes_window.setWindowOpacity(0.0)
         self.notes_window.show()
         
-        # Animate button (slight left movement)
+        # Animate button - direction depends on which side it's on
         button_start = QRect(0, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
-        button_end = QRect(-5, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+        if self._button_side == "right":
+            # Right side: shift RIGHT (positive X)
+            button_end = QRect(5, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+        else:
+            # Left side: shift LEFT (negative X)
+            button_end = QRect(-5, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
         
-        # Animate notes window (fade in and slide from right)
+        # Animate notes window (fade in and slide from appropriate side)
         # Notes window is positioned on screen coordinates
         notes_start = QRect(
             button_x, notes_target_geom.y(),
