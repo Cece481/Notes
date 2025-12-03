@@ -42,11 +42,12 @@ class OverlayMainWindow(QMainWindow):
         self._setup_widgets()
         self._setup_animations()
         self._setup_timers()
-        self._setup_shortcuts()
         self._setup_system_tray()
         self._load_button_side()
         self._position_widgets()
         self._load_notes()
+        # Setup shortcuts AFTER everything else is initialized
+        self._setup_shortcuts()
     
     def _setup_window(self):
         """Configure the main window properties."""
@@ -218,9 +219,15 @@ class OverlayMainWindow(QMainWindow):
     
     def _setup_shortcuts(self):
         """Setup keyboard shortcuts."""
-        self._visibility_shortcut = QShortcut(QKeySequence("Ctrl+Alt+N"), self)
+        # Use QApplication as parent to make shortcut truly global
+        self._visibility_shortcut = QShortcut(QKeySequence("Ctrl+Alt+N"), QApplication.instance())
         self._visibility_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self._visibility_shortcut.activated.connect(self._toggle_manual_visibility)
+        
+        # Also register on notes window as backup
+        self._visibility_shortcut_notes = QShortcut(QKeySequence("Ctrl+Alt+N"), self.notes_window)
+        self._visibility_shortcut_notes.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._visibility_shortcut_notes.activated.connect(self._toggle_manual_visibility)
     
     def _position_widgets(self):
         """Position widgets on screen."""
@@ -538,6 +545,7 @@ class OverlayMainWindow(QMainWindow):
     
     def _toggle_manual_visibility(self):
         """Hide or show the overlay via keyboard shortcut."""
+        print("DEBUG: Ctrl+Alt+N shortcut triggered!")  # Debug line
         if self._is_hidden:
             self._is_hidden = False
             self.button.show()
