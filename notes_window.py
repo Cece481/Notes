@@ -5,10 +5,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, 
     QPushButton, QTabWidget, QMessageBox, QTabBar, QMenu, QInputDialog
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont, QPainter, QPainterPath, QColor, QBrush
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF, QPropertyAnimation, QEasingCurve, QEvent
+from PyQt6.QtGui import QFont, QPainter, QPainterPath, QColor, QBrush, QKeyEvent, QTextCursor
 import config
 from theme_manager import ThemeManager
+import re
 
 
 class NotesWindow(QWidget):
@@ -237,6 +238,9 @@ class NotesWindow(QWidget):
         
         # Connect text change signal
         text_edit.textChanged.connect(self._on_text_changed)
+        
+        # Install event filter for automatic numbering
+        text_edit.installEventFilter(self)
         
         return text_edit
     
@@ -581,6 +585,75 @@ class NotesWindow(QWidget):
         # This will be handled by the main application
         pass
     
+    def eventFilter(self, obj, event):
+        """Event filter for automatic numbering."""
+        if isinstance(obj, QTextEdit) and event.type() == QEvent.Type.KeyPress:
+            key_event = event
+            
+            # Handle Enter key press
+            if key_event.key() == Qt.Key.Key_Return or key_event.key() == Qt.Key.Key_Enter:
+                return self._handle_enter_key(obj)
+        
+        return super().eventFilter(obj, event)
+    
+    def _handle_enter_key(self, text_edit):
+        """Handle Enter key press for automatic numbering."""
+        cursor = text_edit.textCursor()
+        
+        # Get current line text
+        cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+        current_line = cursor.selectedText().strip()
+        
+        # Move cursor to end of line before processing
+        cursor.clearSelection()
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfLine)
+        text_edit.setTextCursor(cursor)
+        
+        # Check if current line matches numbered list pattern (e.g., "1. ", "2. ", etc.)
+        number_pattern = re.match(r'^(\d+)\.\s*(.*)$', current_line)
+        
+        if number_pattern:
+            number = int(number_pattern.group(1))
+            content = number_pattern.group(2).strip()
+            
+            # If the line has no content (just the number), remove the number
+            if not content:
+                # Remove the number from current line
+                cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+                cursor.removeSelectedText()
+                cursor.deletePreviousChar()  # Remove the newline if exists
+                text_edit.setTextCursor(cursor)
+                return True  # Event handled, don't process default Enter
+            else:
+                # Insert newline and next number
+                cursor.insertText(f"\n{number + 1}. ")
+                text_edit.setTextCursor(cursor)
+                return True  # Event handled
+        
+        # Check for bullet points (-, *, •)
+        bullet_pattern = re.match(r'^([-*•])\s*(.*)$', current_line)
+        
+        if bullet_pattern:
+            bullet = bullet_pattern.group(1)
+            content = bullet_pattern.group(2).strip()
+            
+            # If the line has no content (just the bullet), remove the bullet
+            if not content:
+                # Remove the bullet from current line
+                cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+                cursor.removeSelectedText()
+                cursor.deletePreviousChar()  # Remove the newline if exists
+                text_edit.setTextCursor(cursor)
+                return True  # Event handled
+            else:
+                # Insert newline and same bullet
+                cursor.insertText(f"\n{bullet} ")
+                text_edit.setTextCursor(cursor)
+                return True  # Event handled
+        
+        # Default behavior for normal lines
+        return False
+    
     def get_content(self) -> str:
         """Get content from current tab (for compatibility)."""
         current_widget = self.tab_widget.currentWidget()
@@ -691,20 +764,3 @@ class NotesWindow(QWidget):
         path = QPainterPath()
         rect = QRectF(self.rect())
         radius = 12.0
-        path.addRoundedRect(rect, radius, radius)
-        
-        # Draw background with transparency (theme-aware)
-        bg_color_tuple = ThemeManager.get_bg_color()
-        bg_color = QColor(*bg_color_tuple)
-        bg_color.setAlpha(245)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(bg_color))
-        painter.drawPath(path)
-        
-        # Draw subtle border (theme-aware)
-        border_color_tuple = ThemeManager.get_border_color(1.0)
-        border_color = QColor(*border_color_tuple)
-        border_color.setAlpha(200)
-        painter.setPen(border_color)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawPath(path)
