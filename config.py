@@ -9,8 +9,8 @@ APP_NAME = "Notes Overlay"
 APP_VERSION = "1.0.0"
 
 # Window settings
-BUTTON_WIDTH = 45
-BUTTON_HEIGHT = 140
+BUTTON_WIDTH = 30
+BUTTON_HEIGHT = 100
 BUTTON_TOP_MARGIN = 120  # Distance from top of screen
 NOTES_WINDOW_WIDTH = 400
 NOTES_WINDOW_HEIGHT = 500
@@ -45,4 +45,3 @@ DATA_DIR.mkdir(exist_ok=True)
 
 # Fullscreen detection
 FULLSCREEN_CHECK_INTERVAL = 500  # milliseconds
-

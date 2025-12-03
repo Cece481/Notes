@@ -26,4 +26,4 @@ Reduce the size of the main button.
 
 Add settings for opacity, colors, and animation effects.
 
-Ensure support for multiple windows.
+Ensure support for multiple displays. (Done)
