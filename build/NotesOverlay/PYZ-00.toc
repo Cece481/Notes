@@ -395,6 +395,9 @@
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\\Lib\\selectors.py',
    'PYMODULE'),
+  ('settings_window',
+   'C:\\Users\\btser\\OneDrive\\Documents\\GitHub\\Notes\\settings_window.py',
+   'PYMODULE'),
   ('shutil',
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\\Lib\\shutil.py',
@@ -437,6 +440,9 @@
    'PYMODULE'),
   ('theme_manager',
    'C:\\Users\\btser\\OneDrive\\Documents\\GitHub\\Notes\\theme_manager.py',
+   'PYMODULE'),
+  ('theme_presets',
+   'C:\\Users\\btser\\OneDrive\\Documents\\GitHub\\Notes\\theme_presets.py',
    'PYMODULE'),
   ('threading',
    'C:\\Program '

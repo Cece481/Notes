@@ -1,9 +1,9 @@
 [Setup]
 AppName=NotesOverlay
-AppVersion=1.7
+AppVersion=1.8
 DefaultDirName={pf}\NotesOverlay
 OutputDir=C:\Users\btser\OneDrive\Documents\GitHub\Notes\Installers
-OutputBaseFilename=NotesOverlay_1.7_Setup
+OutputBaseFilename=NotesOverlay_1.8_Setup
 
 [Files]
 Source: "C:\Users\btser\OneDrive\Documents\GitHub\Notes\dist\NotesOverlay.exe"; DestDir: "{app}"; DestName: "NotesOverlay.exe"
