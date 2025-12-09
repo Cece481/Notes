@@ -2,6 +2,7 @@
 Main application entry point for Notes Overlay.
 """
 import sys
+import os
 from PyQt6.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu
 from PyQt6.QtCore import (
     Qt,
@@ -9,10 +10,13 @@ from PyQt6.QtCore import (
     QPropertyAnimation,
     QEasingCurve,
     QParallelAnimationGroup,
+    QSequentialAnimationGroup,
     QRect,
     QSettings,
+    QPoint,
+    QSize,
 )
-from PyQt6.QtGui import QScreen, QKeySequence, QShortcut, QCursor, QIcon, QPixmap, QPainter, QColor
+from PyQt6.QtGui import QScreen, QKeySequence, QShortcut, QCursor, QIcon, QPixmap, QPainter, QColor, QAction
 
 import config
 from overlay_button import OverlayButton
@@ -21,6 +25,26 @@ from notes_manager import NotesManager
 from fullscreen_detector import FullscreenDetector
 from theme_manager import ThemeManager
 from settings_window import SettingsWindow
+
+
+def get_icon_path():
+    """
+    Get the correct absolute path to app.ico.
+    Works both during development and after installation as frozen executable.
+    """
+    if getattr(sys, 'frozen', False):
+        # Running as compiled .exe (PyInstaller)
+        # sys.executable gives the full path to the .exe file
+        # Example: C:\Program Files\NotesOverlay\NotesOverlay.exe
+        application_path = os.path.dirname(sys.executable)
+    else:
+        # Running as a Python script during development
+        application_path = os.path.dirname(os.path.abspath(__file__))
+    
+    # Build the full path to app.ico
+    icon_path = os.path.join(application_path, 'app.ico')
+    
+    return icon_path
 
 
 class OverlayMainWindow(QMainWindow):
@@ -35,6 +59,10 @@ class OverlayMainWindow(QMainWindow):
         self._current_screen = None  # Track which screen the button is on
         self._drag_start_global_y = None
         self._drag_start_button_y = None
+        self._is_dragging = False
+        self._target_notes_geometry = None  # Target position for smooth following
+        self._last_window_side = None  # Track if window was above or below button
+        self._reposition_cooldown = False  # Prevent animation spam
         # Settings for persisting button side preference
         self._settings = QSettings("NotesOverlay", config.APP_NAME)
         self._notes_manager = NotesManager()
@@ -84,6 +112,7 @@ class OverlayMainWindow(QMainWindow):
         # Create overlay button
         self.button = OverlayButton(self)
         self.button.clicked.connect(self._toggle_expansion)
+        self.button.rightClicked.connect(self._show_button_context_menu)
         self.button.dragStarted.connect(self._on_button_drag_started)
         self.button.dragMoved.connect(self._on_button_drag_moved)
         self.button.dragEnded.connect(self._on_button_drag_ended)
@@ -100,19 +129,19 @@ class OverlayMainWindow(QMainWindow):
     
     def _setup_system_tray(self):
         """Setup system tray icon with context menu."""
-        # Load icon from app.ico file in the same folder as main.py
-        import os
-        
-        # Get the directory where main.py is located
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        icon_path = os.path.join(current_dir, "app.ico")
+        # Get the correct icon path (works both in development and after installation)
+        icon_path = get_icon_path()
         
         # Try to load the icon file, fall back to generated icon if file not found
-        if os.path.exists(icon_path):
+        if icon_path and os.path.exists(icon_path):
             icon = QIcon(icon_path)
             print(f"Loaded icon from: {icon_path}")
         else:
-            print(f"Warning: app.ico not found at {icon_path}, using generated icon")
+            # Log detailed debug info when icon is not found
+            print(f"Warning: app.ico not found at {icon_path}")
+            print(f"  Executable: {sys.executable}")
+            print(f"  Frozen: {getattr(sys, 'frozen', False)}")
+            print(f"  Current dir: {os.getcwd()}")
             icon = self._create_tray_icon()
         
         # Create system tray icon
@@ -198,33 +227,50 @@ class OverlayMainWindow(QMainWindow):
         QApplication.quit()
     
     def _setup_animations(self):
-        """Setup expansion/collapse animations."""
+        """Setup expansion/collapse animations with Windows 11 style bounce effects."""
+        # Animation durations
+        self._expand_duration = 400  # Slightly longer for smooth entrance
+        self._collapse_duration = 300  # Faster exit
+        
         # Button position animation
         self._button_animation = QPropertyAnimation(self.button, b"geometry")
-        self._button_animation.setDuration(config.ANIMATION_DURATION)
-        self._button_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._button_animation.setDuration(self._expand_duration)
+        self._button_animation.setEasingCurve(QEasingCurve.Type.OutBack)  # Bounce effect
 
         # Snap animation for the overlay window (button container)
         self._snap_animation = QPropertyAnimation(self, b"pos")
         self._snap_animation.setDuration(config.ANIMATION_DURATION)
-        self._snap_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._snap_animation.finished.connect(self._position_notes_window)
+        self._snap_animation.setEasingCurve(QEasingCurve.Type.OutBack)  # Bounce snap
+        # Note: Window animation is now handled in _snap_button_to_current_side via _animate_window_snap_sync
         
         # Notes window opacity animation
         self._notes_opacity_animation = QPropertyAnimation(self.notes_window, b"windowOpacity")
-        self._notes_opacity_animation.setDuration(config.ANIMATION_DURATION)
+        self._notes_opacity_animation.setDuration(self._expand_duration)
         self._notes_opacity_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         
-        # Notes window geometry animation
+        # Notes window geometry animation with bounce
         self._notes_geometry_animation = QPropertyAnimation(self.notes_window, b"geometry")
-        self._notes_geometry_animation.setDuration(config.ANIMATION_DURATION)
-        self._notes_geometry_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._notes_geometry_animation.setDuration(self._expand_duration)
+        self._notes_geometry_animation.setEasingCurve(QEasingCurve.Type.OutBack)  # Bounce effect
         
-        # Parallel animation group
+        # Parallel animation group for expansion
         self._animation_group = QParallelAnimationGroup()
         self._animation_group.addAnimation(self._button_animation)
         self._animation_group.addAnimation(self._notes_opacity_animation)
         self._animation_group.addAnimation(self._notes_geometry_animation)
+        
+        # Collapse animation group (faster, ease-in)
+        self._collapse_animation_group = QParallelAnimationGroup()
+        
+        # Smooth window following animation during drag
+        self._follow_animation = QPropertyAnimation(self.notes_window, b"geometry")
+        self._follow_animation.setDuration(350)
+        self._follow_animation.setEasingCurve(QEasingCurve.Type.OutBack)  # Bounce for repositioning
+        
+        # Timer for smooth following with slight trail effect (~60fps)
+        self._follow_timer = QTimer(self)
+        self._follow_timer.setInterval(16)  # ~60fps
+        self._follow_timer.timeout.connect(self._update_window_follow)
     
     def _setup_timers(self):
         """Setup periodic timers."""
@@ -281,9 +327,9 @@ class OverlayMainWindow(QMainWindow):
         # Reposition widgets to ensure they're still on a valid screen
         self._position_widgets()
         
-        # If expanded, reposition notes window as well
+        # If expanded, reposition notes window as well with animation
         if self._is_expanded:
-            self._position_notes_window()
+            self._position_notes_window(animate=True)
     
     def _position_widgets(self):
         """Position widgets on screen."""
@@ -319,7 +365,7 @@ class OverlayMainWindow(QMainWindow):
             self._expand()
     
     def _expand(self):
-        """Expand the notes window."""
+        """Expand the notes window with Windows 11 style bounce animation."""
         if self._is_expanded:
             return
         
@@ -329,41 +375,55 @@ class OverlayMainWindow(QMainWindow):
         screen_geometry = screen.geometry()
         screen_width = screen_geometry.width()
 
-        # Calculate button X based on side (do NOT move the button vertically)
+        # Calculate button X based on side
         if self._button_side == "right":
             button_x = screen_geometry.x() + screen_width - config.BUTTON_WIDTH
         else:
             button_x = screen_geometry.x()
 
-        # Target geometry for notes window that keeps it on-screen
+        # Target geometry for notes window
         notes_target_geom = self._compute_notes_target_geometry()
         
-        # Show notes window
-        self.notes_window.setWindowOpacity(0.0)
-        self.notes_window.show()
+        # Calculate start position (from button position, scaled down)
+        button_center_y = screen_geometry.y() + self._button_y + config.BUTTON_HEIGHT // 2
         
-        # Animate button - direction depends on which side it's on
-        button_start = QRect(0, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+        # Start geometry: small, at button position
+        start_width = int(config.NOTES_WINDOW_WIDTH * 0.3)
+        start_height = int(config.NOTES_WINDOW_HEIGHT * 0.3)
+        
         if self._button_side == "right":
-            # Right side: shift RIGHT (positive X)
-            button_end = QRect(5, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+            start_x = button_x - start_width
         else:
-            # Left side: shift LEFT (negative X)
-            button_end = QRect(-5, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+            start_x = button_x + config.BUTTON_WIDTH
         
-        # Animate notes window (fade in and slide from appropriate side)
-        # Notes window is positioned on screen coordinates
-        notes_start = QRect(
-            button_x, notes_target_geom.y(),
-            config.NOTES_WINDOW_WIDTH,
-            config.NOTES_WINDOW_HEIGHT
-        )
+        start_y = button_center_y - start_height // 2
+        
+        notes_start = QRect(start_x, start_y, start_width, start_height)
         notes_end = notes_target_geom
         
-        # Main window stays the same size (only button window)
-        # Don't animate main window for now - it stays button-sized
+        # Show notes window with initial state
+        self.notes_window.setWindowOpacity(0.0)
+        self.notes_window.setGeometry(notes_start)
+        self.notes_window.show()
         
-        # Setup animations
+        # Button animation - slight shift with bounce
+        button_start = QRect(0, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+        if self._button_side == "right":
+            button_end = QRect(8, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+        else:
+            button_end = QRect(-8, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+        
+        # Set expansion animation durations and curves
+        self._button_animation.setDuration(self._expand_duration)
+        self._button_animation.setEasingCurve(QEasingCurve.Type.OutBack)
+        
+        self._notes_opacity_animation.setDuration(self._expand_duration)
+        self._notes_opacity_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        self._notes_geometry_animation.setDuration(self._expand_duration)
+        self._notes_geometry_animation.setEasingCurve(QEasingCurve.Type.OutBack)
+        
+        # Setup animation values
         self._button_animation.setStartValue(button_start)
         self._button_animation.setEndValue(button_end)
         
@@ -373,12 +433,11 @@ class OverlayMainWindow(QMainWindow):
         self._notes_geometry_animation.setStartValue(notes_start)
         self._notes_geometry_animation.setEndValue(notes_end)
         
-        # Remove window animation from group since we're not using it
         # Start animations
         self._animation_group.start()
     
     def _collapse(self):
-        """Collapse the notes window."""
+        """Collapse the notes window with smooth shrink animation back to button."""
         if not self._is_expanded:
             return
         
@@ -388,28 +447,43 @@ class OverlayMainWindow(QMainWindow):
         screen_geometry = screen.geometry()
         screen_width = screen_geometry.width()
 
-        # Calculate positions based on which side the button is on
+        # Calculate button position
         if self._button_side == "right":
             button_x = screen_geometry.x() + screen_width - config.BUTTON_WIDTH
-            notes_end_x = button_x
         else:
             button_x = screen_geometry.x()
-            notes_end_x = button_x - config.NOTES_WINDOW_WIDTH
 
-        button_y = self._button_y
+        button_center_y = screen_geometry.y() + self._button_y + config.BUTTON_HEIGHT // 2
+        
+        # End geometry: small, at button position (reverse of expand)
+        end_width = int(config.NOTES_WINDOW_WIDTH * 0.3)
+        end_height = int(config.NOTES_WINDOW_HEIGHT * 0.3)
+        
+        if self._button_side == "right":
+            end_x = button_x - end_width
+        else:
+            end_x = button_x + config.BUTTON_WIDTH
+        
+        end_y = button_center_y - end_height // 2
         
         # Animate button back
         button_start = self.button.geometry()
         button_end = QRect(0, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
         
         notes_start = self.notes_window.geometry()
-        notes_end = QRect(
-            notes_end_x, button_y,
-            config.NOTES_WINDOW_WIDTH,
-            config.NOTES_WINDOW_HEIGHT
-        )
+        notes_end = QRect(end_x, end_y, end_width, end_height)
         
-        # Setup animations
+        # Set collapse animation durations and curves (faster, ease-in)
+        self._button_animation.setDuration(self._collapse_duration)
+        self._button_animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        
+        self._notes_opacity_animation.setDuration(self._collapse_duration)
+        self._notes_opacity_animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        
+        self._notes_geometry_animation.setDuration(self._collapse_duration)
+        self._notes_geometry_animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        
+        # Setup animation values
         self._button_animation.setStartValue(button_start)
         self._button_animation.setEndValue(button_end)
         
@@ -419,8 +493,11 @@ class OverlayMainWindow(QMainWindow):
         self._notes_geometry_animation.setStartValue(notes_start)
         self._notes_geometry_animation.setEndValue(notes_end)
         
-        # Start animations
-        self._animation_group.start()
+        # Disconnect any previous connections to avoid multiple calls
+        try:
+            self._notes_opacity_animation.finished.disconnect()
+        except:
+            pass
         
         # Hide notes window after animation completes
         def hide_notes():
@@ -428,6 +505,9 @@ class OverlayMainWindow(QMainWindow):
                 self.notes_window.hide()
         
         self._notes_opacity_animation.finished.connect(hide_notes)
+        
+        # Start animations
+        self._animation_group.start()
     
     def _apply_button_position(self):
         """Move the overlay button window to the current Y coordinate."""
@@ -493,9 +573,22 @@ class OverlayMainWindow(QMainWindow):
             config.NOTES_WINDOW_HEIGHT,
         )
 
-    def _position_notes_window(self):
+    def _position_notes_window(self, animate: bool = False):
         """Align notes window with the button, keeping it fully on-screen."""
         target_geom = self._compute_notes_target_geometry()
+        
+        if animate and self.notes_window.isVisible():
+            # Animate to new position
+            current = self.notes_window.geometry()
+            if abs(current.x() - target_geom.x()) > 5 or abs(current.y() - target_geom.y()) > 5:
+                self._follow_animation.stop()
+                self._follow_animation.setStartValue(current)
+                self._follow_animation.setEndValue(target_geom)
+                self._follow_animation.setDuration(350)
+                self._follow_animation.setEasingCurve(QEasingCurve.Type.OutBack)
+                self._follow_animation.start()
+                return
+        
         self.notes_window.setGeometry(target_geom)
     
     def _clamp_button_position(self, desired_y: int) -> int:
@@ -507,11 +600,26 @@ class OverlayMainWindow(QMainWindow):
     
     def _on_button_drag_started(self, global_y: float):
         """Store initial positions at the start of a drag."""
+        # Cancel any ongoing snap animation (allow interrupt)
+        self._snap_animation.stop()
+        self._follow_animation.stop()
+        
         self._drag_start_global_y = global_y
         self._drag_start_button_y = self._button_y
+        self._is_dragging = True
+        
+        # Store current window side (above or below button)
+        if self._is_expanded:
+            current_geom = self.notes_window.geometry()
+            button_y = self.y()
+            self._last_window_side = "above" if current_geom.y() < button_y else "below"
+            
+            # Start smooth following timer
+            self._target_notes_geometry = current_geom
+            self._follow_timer.start()
     
     def _on_button_drag_moved(self, global_y: float):
-        """Update button and notes positions while dragging."""
+        """Update button and notes positions while dragging with smooth window following."""
         if self._drag_start_global_y is None or self._drag_start_button_y is None:
             return
         
@@ -534,19 +642,44 @@ class OverlayMainWindow(QMainWindow):
         self._button_y = new_y
 
         # Horizontal movement follows the cursor during drag
-        # Center button on cursor X while keeping it on current screen
         tentative_x = int(cursor_pos.x() - config.BUTTON_WIDTH / 2)
         tentative_x = max(screen_geometry.x(), 
                          min(screen_geometry.x() + screen_width - config.BUTTON_WIDTH, tentative_x))
         
+        # Move button immediately
         self.move(tentative_x, screen_geometry.y() + self._button_y)
         self.button.move(0, 0)
-        self._position_notes_window()
+        
+        # Update target geometry for smooth following (if expanded)
+        if self._is_expanded:
+            new_target = self._compute_notes_target_geometry()
+            
+            # Check if we need to reposition (window side change)
+            button_screen_y = self._button_y
+            new_window_side = "above" if new_target.y() < (screen_geometry.y() + button_screen_y) else "below"
+            
+            # If side changed and not in cooldown, trigger smooth reposition animation
+            if self._last_window_side and new_window_side != self._last_window_side and not self._reposition_cooldown:
+                self._trigger_reposition_animation(new_target)
+                self._last_window_side = new_window_side
+            else:
+                # Normal following - update target for smooth interpolation
+                self._target_notes_geometry = new_target
+                if not self._last_window_side:
+                    self._last_window_side = new_window_side
+        else:
+            # If not expanded, just update position directly
+            self._position_notes_window()
     
     def _on_button_drag_ended(self):
         """Reset drag tracking when the drag finishes."""
         self._drag_start_global_y = None
         self._drag_start_button_y = None
+        self._is_dragging = False
+        self._last_window_side = None
+        
+        # Stop follow timer
+        self._follow_timer.stop()
 
         # Decide which side to snap to based on final horizontal position on current screen
         screen = self._get_current_screen()
@@ -561,25 +694,191 @@ class OverlayMainWindow(QMainWindow):
 
         self._save_button_side()
         self._snap_button_to_current_side()
+        # Note: Notes window animation is now handled inside _snap_button_to_current_side
 
     def _snap_button_to_current_side(self):
-        """Animate button snapping to the nearest screen edge while keeping Y."""
+        """Animate button snapping to the nearest screen edge with bounce effect."""
         screen = self._get_current_screen()
         screen_geometry = screen.geometry()
         
+        # Calculate target position (edge of screen)
         if self._button_side == "right":
             target_x = screen_geometry.x() + screen_geometry.width() - config.BUTTON_WIDTH
         else:
             target_x = screen_geometry.x()
 
+        # Get the ACTUAL current position (force update to avoid stale values)
         start_pos = self.pos()
-        end_pos = start_pos
-        end_pos.setX(int(target_x))
+        current_y = start_pos.y()
+        end_pos = QPoint(int(target_x), current_y)
+        
+        # Calculate distance for adaptive animation duration
+        distance = abs(start_pos.x() - target_x)
+        
+        # If already at target, no animation needed
+        if distance < 2:
+            self.move(end_pos)
+            if self._is_expanded:
+                self._position_notes_window()
+            return
+        
+        # Distance-based duration with bounce effect
+        if distance < 50:
+            duration = 250  # Very close - quick snap with bounce
+            easing = QEasingCurve.Type.OutBack
+        elif distance < 150:
+            duration = 300  # Close - medium snap
+            easing = QEasingCurve.Type.OutBack
+        elif distance < 300:
+            duration = 350  # Medium distance
+            easing = QEasingCurve.Type.OutBack
+        else:
+            duration = 400  # Far distance - full animation with pronounced bounce
+            easing = QEasingCurve.Type.OutBack
 
+        # Stop any running animation first
         self._snap_animation.stop()
+        
+        # CRITICAL: Ensure widget is at start position to prevent visual jump
+        # QPropertyAnimation doesn't apply startValue immediately on start()
+        self.move(start_pos)
+        
+        # Configure snap animation with bounce effect
+        self._snap_animation.setDuration(duration)
+        self._snap_animation.setEasingCurve(easing)
         self._snap_animation.setStartValue(start_pos)
         self._snap_animation.setEndValue(end_pos)
+        
+        # Disconnect any previous finished connections
+        try:
+            self._snap_animation.finished.disconnect()
+        except:
+            pass
+        
+        # Connect finished handler to ensure final position is correct
+        def on_snap_finished():
+            # Ensure button is exactly at target position
+            self.move(end_pos)
+            # Ensure notes window is in correct position after snap completes
+            if self._is_expanded and not self._follow_animation.state() == QPropertyAnimation.State.Running:
+                self._position_notes_window()
+        
+        self._snap_animation.finished.connect(on_snap_finished)
+        
+        # Start animation
         self._snap_animation.start()
+        
+        # Also animate notes window in sync if expanded
+        if self._is_expanded and self.notes_window.isVisible():
+            self._animate_window_snap_sync(duration, easing)
+    
+    def _update_window_follow(self):
+        """Timer callback for smooth window following during drag (lerp interpolation)."""
+        if not self._is_dragging or not self._is_expanded or self._target_notes_geometry is None:
+            return
+        
+        # Skip if reposition animation is running
+        if self._follow_animation.state() == QPropertyAnimation.State.Running:
+            return
+        
+        # Get current geometry
+        current = self.notes_window.geometry()
+        target = self._target_notes_geometry
+        
+        # Calculate distance for adaptive smoothing
+        dist_x = abs(target.x() - current.x())
+        dist_y = abs(target.y() - current.y())
+        total_dist = (dist_x ** 2 + dist_y ** 2) ** 0.5
+        
+        # Adaptive smoothing: faster when far, slower when close (for precise landing)
+        if total_dist > 100:
+            smoothing = 0.35  # Faster catch-up
+        elif total_dist > 30:
+            smoothing = 0.25  # Normal following
+        else:
+            smoothing = 0.4   # Quick settle when close
+        
+        # Linear interpolation (lerp) for smooth trailing effect
+        new_x = int(current.x() + (target.x() - current.x()) * smoothing)
+        new_y = int(current.y() + (target.y() - current.y()) * smoothing)
+        new_width = int(current.width() + (target.width() - current.width()) * smoothing)
+        new_height = int(current.height() + (target.height() - current.height()) * smoothing)
+        
+        # Apply new position
+        self.notes_window.setGeometry(new_x, new_y, new_width, new_height)
+    
+    def _trigger_reposition_animation(self, target_geometry: QRect):
+        """Trigger smooth animation when window needs to flip from above to below or vice versa."""
+        # Set cooldown to prevent animation spam
+        self._reposition_cooldown = True
+        
+        # Stop the follow timer temporarily during animation
+        self._follow_timer.stop()
+        
+        # Setup and start the reposition animation
+        self._follow_animation.stop()
+        self._follow_animation.setStartValue(self.notes_window.geometry())
+        self._follow_animation.setEndValue(target_geometry)
+        self._follow_animation.setDuration(350)
+        self._follow_animation.setEasingCurve(QEasingCurve.Type.OutBack)  # Bounce effect
+        
+        # Disconnect any previous connections
+        try:
+            self._follow_animation.finished.disconnect()
+        except:
+            pass
+        
+        # Resume following after animation and reset cooldown
+        def on_reposition_finished():
+            self._reposition_cooldown = False
+            self._target_notes_geometry = target_geometry
+            if self._is_dragging:
+                self._follow_timer.start()
+        
+        self._follow_animation.finished.connect(on_reposition_finished)
+        self._follow_animation.start()
+    
+    def _animate_notes_to_final_position(self):
+        """Animate notes window to its final position after drag ends."""
+        target = self._compute_notes_target_geometry()
+        current = self.notes_window.geometry()
+        
+        # Only animate if there's a meaningful difference
+        if abs(current.x() - target.x()) > 5 or abs(current.y() - target.y()) > 5:
+            self._follow_animation.stop()
+            self._follow_animation.setStartValue(current)
+            self._follow_animation.setEndValue(target)
+            self._follow_animation.setDuration(350)
+            self._follow_animation.setEasingCurve(QEasingCurve.Type.OutBack)
+            self._follow_animation.start()
+        else:
+            # Just set directly if close enough
+            self.notes_window.setGeometry(target)
+    
+    def _animate_window_snap_sync(self, duration: int, easing: QEasingCurve.Type = QEasingCurve.Type.OutBack):
+        """Animate notes window in sync with button snap animation."""
+        # Calculate the final target position after snap completes
+        target = self._compute_notes_target_geometry()
+        current = self.notes_window.geometry()
+        
+        # If already close to target, just set directly
+        dist = abs(current.x() - target.x()) + abs(current.y() - target.y())
+        if dist < 5:
+            self.notes_window.setGeometry(target)
+            return
+        
+        # Stop any running animation
+        self._follow_animation.stop()
+        
+        # Ensure window is at current position to prevent visual jump
+        self.notes_window.setGeometry(current)
+        
+        # Setup synchronized animation with matching easing
+        self._follow_animation.setStartValue(current)
+        self._follow_animation.setEndValue(target)
+        self._follow_animation.setDuration(duration)
+        self._follow_animation.setEasingCurve(easing)  # Match button animation
+        self._follow_animation.start()
     
     def _on_notes_changed(self, content: str):
         """Handle notes content change."""
@@ -657,6 +956,59 @@ class OverlayMainWindow(QMainWindow):
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
+    
+    def _show_button_context_menu(self):
+        """Show context menu when right-clicking the NOTES button (same as tray menu)."""
+        # Create context menu with same items as system tray
+        menu = QMenu()
+        
+        # Style the menu for Windows 11 look
+        theme = self._theme_manager.get_theme()
+        bg_color = theme["window_bg"]
+        text_color = theme["text_primary"]
+        accent = theme["accent_color"]
+        border_color = theme["border_color"]
+        
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {bg_color};
+                color: {text_color};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+                padding: 5px;
+            }}
+            QMenu::item {{
+                padding: 8px 25px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: {accent};
+                color: white;
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: {border_color};
+                margin: 5px 10px;
+            }}
+        """)
+        
+        # Add Show/Hide action
+        show_hide_action = menu.addAction("Show/Hide Overlay")
+        show_hide_action.triggered.connect(self._toggle_manual_visibility)
+        
+        # Add Settings action
+        settings_action = menu.addAction("Settings")
+        settings_action.triggered.connect(self._show_settings)
+        
+        # Add separator
+        menu.addSeparator()
+        
+        # Add Exit action
+        exit_action = menu.addAction("Exit")
+        exit_action.triggered.connect(self._exit_application)
+        
+        # Show menu at cursor position
+        menu.exec(QCursor.pos())
 
 
 def main():

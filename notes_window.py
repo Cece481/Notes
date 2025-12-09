@@ -5,8 +5,9 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, 
     QPushButton, QTabWidget, QMessageBox, QTabBar, QMenu, QInputDialog
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF, QPropertyAnimation, QEasingCurve, QEvent
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF, QPropertyAnimation, QEasingCurve, QEvent, QParallelAnimationGroup, QSequentialAnimationGroup
 from PyQt6.QtGui import QFont, QPainter, QPainterPath, QColor, QBrush, QPen, QKeyEvent, QTextCursor
+from PyQt6.QtWidgets import QGraphicsOpacityEffect
 import config
 from theme_manager import ThemeManager
 import re
@@ -224,7 +225,7 @@ class NotesWindow(QWidget):
         return text_edit
     
     def _add_new_tab(self):
-        """Add a new tab with a text editor and animation."""
+        """Add a new tab with a text editor and Windows 11 style animation."""
         text_edit = self._create_text_editor()
         
         # Find the next available "Note X" name
@@ -262,27 +263,31 @@ class NotesWindow(QWidget):
             close_btn
         )
         
-        # Switch to new tab with animation
+        # Switch to new tab
         self.tab_widget.setCurrentIndex(new_index)
         
-        # Animate the new tab (fade in effect on the text editor)
-        text_edit.setStyleSheet("QTextEdit { opacity: 0; }")
-        animation = QPropertyAnimation(text_edit, b"windowOpacity")
-        animation.setDuration(300)
-        animation.setStartValue(0.0)
-        animation.setEndValue(1.0)
-        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        # Create opacity effect for smooth fade animation
+        opacity_effect = QGraphicsOpacityEffect(text_edit)
+        opacity_effect.setOpacity(0.0)
+        text_edit.setGraphicsEffect(opacity_effect)
         
-        # Reset stylesheet after animation
-        def reset_style():
-            text_edit.setStyleSheet("")
-            self._setup_styling()
+        # Animate: fade in with bounce easing (350ms)
+        fade_animation = QPropertyAnimation(opacity_effect, b"opacity")
+        fade_animation.setDuration(350)
+        fade_animation.setStartValue(0.0)
+        fade_animation.setEndValue(1.0)
+        fade_animation.setEasingCurve(QEasingCurve.Type.OutBack)  # Bounce effect
         
-        animation.finished.connect(reset_style)
-        animation.start()
+        # Clean up after animation
+        def cleanup():
+            text_edit.setGraphicsEffect(None)  # Remove effect for better performance
+        
+        fade_animation.finished.connect(cleanup)
+        fade_animation.start()
         
         # Store animation to prevent garbage collection
-        self._last_animation = animation
+        self._last_animation = fade_animation
+        self._last_opacity_effect = opacity_effect
     
     def _get_next_available_tab_name(self):
         """Find the next available 'Note X' name that doesn't exist."""
@@ -395,16 +400,23 @@ class NotesWindow(QWidget):
         # Store the current tab index before removal
         current_index = self.tab_widget.currentIndex()
         
-        # Animate tab close (fade out)
+        # Animate tab close (shrink + fade out, 300ms)
         if text_edit and isinstance(text_edit, QTextEdit):
-            animation = QPropertyAnimation(text_edit, b"windowOpacity")
-            animation.setDuration(200)
-            animation.setStartValue(1.0)
-            animation.setEndValue(0.0)
-            animation.setEasingCurve(QEasingCurve.Type.InCubic)
+            # Create opacity effect for fade animation
+            opacity_effect = QGraphicsOpacityEffect(text_edit)
+            opacity_effect.setOpacity(1.0)
+            text_edit.setGraphicsEffect(opacity_effect)
+            
+            # Fade out animation
+            fade_animation = QPropertyAnimation(opacity_effect, b"opacity")
+            fade_animation.setDuration(300)
+            fade_animation.setStartValue(1.0)
+            fade_animation.setEndValue(0.0)
+            fade_animation.setEasingCurve(QEasingCurve.Type.InCubic)  # Accelerate out
             
             # Remove tab after animation
             def remove_tab():
+                text_edit.setGraphicsEffect(None)  # Clean up
                 self.tab_widget.removeTab(index)
                 # Update plus tab index - find it again
                 for i in range(self.tab_widget.count()):
@@ -420,11 +432,12 @@ class NotesWindow(QWidget):
                 
                 self._on_text_changed()
             
-            animation.finished.connect(remove_tab)
-            animation.start()
+            fade_animation.finished.connect(remove_tab)
+            fade_animation.start()
             
-            # Store animation to prevent garbage collection
-            self._last_animation = animation
+            # Store to prevent garbage collection
+            self._last_animation = fade_animation
+            self._last_opacity_effect = opacity_effect
         else:
             # If no animation needed, remove directly
             self.tab_widget.removeTab(index)
@@ -531,7 +544,7 @@ class NotesWindow(QWidget):
             self.tab_widget.tabBar().blockSignals(False)
     
     def _on_tab_changed(self, index):
-        """Handle tab change."""
+        """Handle tab change with smooth crossfade animation."""
         # Check if user clicked on the + tab
         if self._plus_tab_index >= 0 and index == self._plus_tab_index:
             # Block signals temporarily
@@ -548,6 +561,32 @@ class NotesWindow(QWidget):
             # Add new tab
             self._add_new_tab()
         elif index >= 0:
+            # Animate tab content fade in (250ms)
+            current_widget = self.tab_widget.widget(index)
+            if current_widget and isinstance(current_widget, QTextEdit):
+                # Create opacity effect
+                opacity_effect = QGraphicsOpacityEffect(current_widget)
+                opacity_effect.setOpacity(0.0)
+                current_widget.setGraphicsEffect(opacity_effect)
+                
+                # Fade in animation
+                fade_animation = QPropertyAnimation(opacity_effect, b"opacity")
+                fade_animation.setDuration(250)
+                fade_animation.setStartValue(0.0)
+                fade_animation.setEndValue(1.0)
+                fade_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+                
+                # Clean up after animation
+                def cleanup():
+                    current_widget.setGraphicsEffect(None)
+                
+                fade_animation.finished.connect(cleanup)
+                fade_animation.start()
+                
+                # Store to prevent garbage collection
+                self._tab_switch_animation = fade_animation
+                self._tab_switch_effect = opacity_effect
+            
             self._on_text_changed()
     
     def _on_text_changed(self):

@@ -11,6 +11,7 @@ from theme_manager import ThemeManager
 class OverlayButton(QWidget):
     """Signal emitted when button is clicked."""
     clicked = pyqtSignal()
+    rightClicked = pyqtSignal()  # Right-click for context menu
     dragStarted = pyqtSignal(float)  # Global Y position when drag begins
     dragMoved = pyqtSignal(float)    # Current global Y during drag
     dragEnded = pyqtSignal()         # Drag finished
@@ -86,6 +87,9 @@ class OverlayButton(QWidget):
             self._dragging = False
             self._press_global_pos = event.globalPosition()
             self.update()
+        elif event.button() == Qt.MouseButton.RightButton:
+            # Emit right-click signal for context menu
+            self.rightClicked.emit()
         super().mousePressEvent(event)
     
     def mouseMoveEvent(self, event):

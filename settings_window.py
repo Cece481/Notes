@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QSlider, QSpinBox, QComboBox, QGroupBox, QScrollArea, QFileDialog,
     QMessageBox, QFrame, QSizePolicy, QLineEdit, QGridLayout
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve, QPoint, QRect
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QBrush, QPen, QMouseEvent
 from theme_manager import ThemeManager
 from theme_presets import ThemePresets
@@ -158,6 +158,11 @@ class SettingsWindow(QWidget):
         self.setWindowTitle("Settings - Notes Overlay")
         self.setMinimumSize(700, 800)
         self.resize(750, 900)
+        
+        # Setup slide-in animation
+        self._slide_animation = QPropertyAnimation(self, b"geometry")
+        self._slide_animation.setDuration(400)
+        self._slide_animation.setEasingCurve(QEasingCurve.Type.OutBack)  # Bounce effect
         
         # Apply current theme to window
         self._apply_theme_to_ui()
@@ -846,8 +851,60 @@ class SettingsWindow(QWidget):
         """
         self.setStyleSheet(stylesheet)
     
+    def show(self):
+        """Override show to add slide-in animation from right."""
+        # Get screen geometry
+        from PyQt6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen()
+        screen_geometry = screen.geometry()
+        
+        # Calculate target position (centered)
+        target_x = (screen_geometry.width() - self.width()) // 2
+        target_y = (screen_geometry.height() - self.height()) // 2
+        
+        # Start position (off-screen to the right)
+        start_x = screen_geometry.width()
+        
+        # Set start geometry
+        start_rect = QRect(start_x, target_y, self.width(), self.height())
+        target_rect = QRect(target_x, target_y, self.width(), self.height())
+        
+        self.setGeometry(start_rect)
+        super().show()
+        
+        # Animate slide-in
+        self._slide_animation.setStartValue(start_rect)
+        self._slide_animation.setEndValue(target_rect)
+        self._slide_animation.start()
+    
     def closeEvent(self, event):
-        """Handle window close event."""
-        self._theme_manager.unregister_listener(self._apply_theme_to_ui)
-        event.accept()
+        """Handle window close event with slide-out animation."""
+        # Slide out animation
+        from PyQt6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen()
+        screen_geometry = screen.geometry()
+        
+        current_rect = self.geometry()
+        end_x = screen_geometry.width()
+        end_rect = QRect(end_x, current_rect.y(), self.width(), self.height())
+        
+        # Create close animation
+        close_animation = QPropertyAnimation(self, b"geometry")
+        close_animation.setDuration(300)
+        close_animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        close_animation.setStartValue(current_rect)
+        close_animation.setEndValue(end_rect)
+        
+        # Store reference and connect to finish
+        self._close_animation = close_animation
+        
+        def finish_close():
+            self._theme_manager.unregister_listener(self._apply_theme_to_ui)
+            self.hide()
+        
+        close_animation.finished.connect(finish_close)
+        close_animation.start()
+        
+        # Ignore the close event - we'll hide after animation
+        event.ignore()
 
