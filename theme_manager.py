@@ -9,6 +9,8 @@ from typing import Dict, Optional, Callable, List
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor
 import config
+from theme_presets import ThemePresets
+from theme_presets import ThemePresets
 
 try:
     import winreg
@@ -261,6 +263,23 @@ class ThemeManager(QObject):
         self._apply_theme()
         self.theme_changed.emit()
         self.save_theme()
+    
+    def apply_preset(self, preset_id: str):
+        """Apply a theme preset by ID."""
+        preset = ThemePresets.get_preset_by_id(preset_id)
+        if preset:
+            # Remove metadata fields (id, name, category, mode)
+            theme_data = {k: v for k, v in preset.items() 
+                         if k not in ["id", "name", "category", "mode"]}
+            self.set_custom_theme(theme_data)
+            # Store preset ID for reference
+            self._current_preset_id = preset_id
+        else:
+            print(f"Preset '{preset_id}' not found")
+    
+    def get_current_preset_id(self) -> Optional[str]:
+        """Get the ID of the currently applied preset, if any."""
+        return getattr(self, '_current_preset_id', None)
     
     def reset_to_default(self):
         """Reset to default theme based on current mode."""

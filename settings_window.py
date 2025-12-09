@@ -9,9 +9,77 @@ from PyQt6.QtWidgets import (
     QMessageBox, QFrame, QSizePolicy, QLineEdit, QGridLayout
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QBrush, QPen
+from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QBrush, QPen, QMouseEvent
 from theme_manager import ThemeManager
+from theme_presets import ThemePresets
 import config
+
+
+class PresetCard(QFrame):
+    """Clickable preset card widget."""
+    
+    def __init__(self, preset: dict, on_click_callback, parent=None):
+        super().__init__(parent)
+        self.preset = preset
+        self.on_click = on_click_callback
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        """Setup the card UI."""
+        self.setFrameShape(QFrame.Shape.Box)
+        self.setLineWidth(2)
+        self.setFixedSize(100, 80)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(3)
+        
+        # Color preview (show 3 main colors in a compact row)
+        preview_layout = QHBoxLayout()
+        preview_layout.setSpacing(2)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        
+        colors_to_show = [
+            self.preset.get("window_bg", "#000000"),
+            self.preset.get("accent_color", "#000000"),
+            self.preset.get("border_color", "#000000"),
+        ]
+        
+        for color_hex in colors_to_show:
+            color_widget = QFrame()
+            color_widget.setFixedSize(20, 20)
+            color_widget.setStyleSheet(f"QFrame {{ background-color: {color_hex}; border: 1px solid #888; border-radius: 2px; }}")
+            preview_layout.addWidget(color_widget)
+        
+        preview_layout.addStretch()
+        layout.addLayout(preview_layout)
+        
+        # Theme name (smaller font)
+        name_label = QLabel(self.preset["name"])
+        name_label.setStyleSheet("QLabel { font-weight: bold; font-size: 9pt; }")
+        name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(name_label)
+        
+        # Mode badge (compact)
+        mode = self.preset.get("mode", "light")
+        mode_label = QLabel("☀" if mode == "light" else "🌙")
+        mode_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mode_label.setStyleSheet("QLabel { font-size: 10pt; }")
+        layout.addWidget(mode_label)
+    
+    def mousePressEvent(self, event: QMouseEvent):
+        """Handle mouse click on card."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.on_click(self.preset["id"])
+        super().mousePressEvent(event)
+    
+    def set_active(self, active: bool):
+        """Set the active state of the card."""
+        if active:
+            self.setStyleSheet("QFrame { border: 2px solid #0078d7; border-radius: 4px; background-color: #E3F2FD; }")
+        else:
+            self.setStyleSheet("QFrame { border: 1px solid #ccc; border-radius: 4px; } QFrame:hover { border: 1px solid #0078d7; background-color: #F5F5F5; }")
 
 
 class ColorPickerButton(QPushButton):
@@ -114,6 +182,10 @@ class SettingsWindow(QWidget):
         appearance_group = self._create_appearance_section()
         content_layout.addWidget(appearance_group)
         
+        # Theme Presets Section
+        presets_group = self._create_presets_section()
+        content_layout.addWidget(presets_group)
+        
         # Colors Section
         colors_group = self._create_colors_section()
         content_layout.addWidget(colors_group)
@@ -170,6 +242,77 @@ class SettingsWindow(QWidget):
         
         group.setLayout(layout)
         return group
+    
+    def _create_presets_section(self) -> QGroupBox:
+        """Create theme presets section with preview cards."""
+        group = QGroupBox("Theme Presets")
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(8)
+        
+        # Search/filter (optional, can add later)
+        # For now, just show all presets organized by category
+        
+        # Get all categories
+        categories = ThemePresets.get_categories()
+        
+        for category in categories:
+            # Category label (smaller)
+            category_label = QLabel(f"<b>{category}</b>")
+            category_label.setStyleSheet("QLabel { font-size: 10pt; margin-top: 5px; margin-bottom: 5px; }")
+            main_layout.addWidget(category_label)
+            
+            # Get presets for this category
+            presets = ThemePresets.get_presets_by_category(category)
+            
+            # Create grid for this category
+            grid = QGridLayout()
+            grid.setSpacing(10)
+            
+            row = 0
+            col = 0
+            max_cols = 6  # 6 presets per row (more compact)
+            
+            for preset in presets:
+                card = self._create_preset_card(preset)
+                grid.addWidget(card, row, col)
+                col += 1
+                if col >= max_cols:
+                    col = 0
+                    row += 1
+            
+            main_layout.addLayout(grid)
+        
+        group.setLayout(main_layout)
+        return group
+    
+    def _create_preset_card(self, preset: dict) -> QWidget:
+        """Create a preview card for a theme preset."""
+        card = PresetCard(preset, self._apply_preset, self)
+        
+        # Check if this is the current preset
+        current_preset_id = self._theme_manager.get_current_preset_id()
+        card.set_active(current_preset_id == preset["id"])
+        
+        # Store reference for updating later
+        if not hasattr(self, '_preset_cards'):
+            self._preset_cards = {}
+        self._preset_cards[preset["id"]] = card
+        
+        return card
+    
+    def _apply_preset(self, preset_id: str):
+        """Apply a theme preset."""
+        self._theme_manager.apply_preset(preset_id)
+        self._load_current_theme()
+        # Update preset cards to show which one is active
+        self._update_preset_cards()
+    
+    def _update_preset_cards(self):
+        """Update preset cards to show which one is currently active."""
+        if hasattr(self, '_preset_cards'):
+            current_preset_id = self._theme_manager.get_current_preset_id()
+            for preset_id, card in self._preset_cards.items():
+                card.set_active(preset_id == current_preset_id)
     
     def _create_colors_section(self) -> QGroupBox:
         """Create colors customization section."""
