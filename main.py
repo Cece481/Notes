@@ -3,6 +3,8 @@ Main application entry point for Notes Overlay.
 """
 import sys
 import os
+import ctypes
+from ctypes import wintypes
 from PyQt6.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu
 from PyQt6.QtCore import (
     Qt,
@@ -15,6 +17,7 @@ from PyQt6.QtCore import (
     QSettings,
     QPoint,
     QSize,
+    QAbstractNativeEventFilter,
 )
 from PyQt6.QtGui import QScreen, QKeySequence, QShortcut, QCursor, QIcon, QPixmap, QPainter, QColor, QAction
 
@@ -25,6 +28,38 @@ from notes_manager import NotesManager
 from fullscreen_detector import FullscreenDetector
 from theme_manager import ThemeManager
 from settings_window import SettingsWindow
+
+# Windows API constants for global hotkey
+MOD_ALT = 0x0001
+MOD_CONTROL = 0x0002
+MOD_SHIFT = 0x0004
+MOD_NOREPEAT = 0x4000  # Prevent repeated firing when key is held
+VK_N = 0x4E  # Virtual key code for 'N'
+WM_HOTKEY = 0x0312
+HOTKEY_ID = 1  # Unique ID for our hotkey
+
+
+class GlobalHotkeyFilter(QAbstractNativeEventFilter):
+    """Native event filter to catch global hotkey messages from Windows."""
+    
+    def __init__(self, callback):
+        super().__init__()
+        self.callback = callback
+    
+    def nativeEventFilter(self, eventType, message):
+        """Filter native Windows messages for WM_HOTKEY."""
+        try:
+            if eventType == b"windows_generic_MSG":
+                # Parse the MSG structure
+                msg = ctypes.wintypes.MSG.from_address(int(message))
+                if msg.message == WM_HOTKEY and msg.wParam == HOTKEY_ID:
+                    # Our hotkey was pressed!
+                    if self.callback:
+                        self.callback()
+                    return True, 0  # Message handled
+        except Exception as e:
+            print(f"Error in native event filter: {e}")
+        return False, 0  # Let Qt handle other messages
 
 
 def get_icon_path():
@@ -220,11 +255,30 @@ class OverlayMainWindow(QMainWindow):
         content = self.notes_window.get_content()
         self._notes_manager.save_notes(content)
         
+        # Unregister global hotkey
+        self._unregister_hotkey()
+        
         # Hide tray icon
         self.tray_icon.hide()
         
         # Quit the application
         QApplication.quit()
+    
+    def _unregister_hotkey(self):
+        """Unregister the global hotkey."""
+        if hasattr(self, '_hotkey_registered') and self._hotkey_registered:
+            try:
+                ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
+                print("Global hotkey unregistered")
+            except Exception as e:
+                print(f"Error unregistering hotkey: {e}")
+        
+        # Remove native event filter
+        if hasattr(self, '_hotkey_filter') and self._hotkey_filter:
+            try:
+                QApplication.instance().removeNativeEventFilter(self._hotkey_filter)
+            except Exception as e:
+                print(f"Error removing event filter: {e}")
     
     def _setup_animations(self):
         """Setup expansion/collapse animations with Windows 11 style bounce effects."""
@@ -280,13 +334,46 @@ class OverlayMainWindow(QMainWindow):
         self._fullscreen_timer.start(config.FULLSCREEN_CHECK_INTERVAL)
     
     def _setup_shortcuts(self):
-        """Setup keyboard shortcuts."""
-        # Use QApplication as parent to make shortcut truly global
-        self._visibility_shortcut = QShortcut(QKeySequence("Ctrl+Alt+N"), QApplication.instance())
+        """Setup global keyboard shortcut (Ctrl+Alt+N) using Windows API."""
+        # Register global hotkey using Windows API - works even when app doesn't have focus
+        self._hotkey_registered = False
+        self._hotkey_filter = None
+        
+        try:
+            # Register the global hotkey: Ctrl + Alt + N
+            # MOD_NOREPEAT prevents the hotkey from firing repeatedly when held down
+            result = ctypes.windll.user32.RegisterHotKey(
+                None,  # No specific window - system-wide
+                HOTKEY_ID,
+                MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
+                VK_N
+            )
+            
+            if result:
+                self._hotkey_registered = True
+                print("Global hotkey Ctrl+Alt+N registered successfully")
+                
+                # Install native event filter to catch the hotkey
+                self._hotkey_filter = GlobalHotkeyFilter(self._toggle_manual_visibility)
+                QApplication.instance().installNativeEventFilter(self._hotkey_filter)
+            else:
+                error_code = ctypes.windll.kernel32.GetLastError()
+                print(f"Failed to register global hotkey. Error code: {error_code}")
+                print("Hotkey might be in use by another application.")
+                # Fall back to Qt shortcut (only works when app has focus)
+                self._setup_fallback_shortcuts()
+                
+        except Exception as e:
+            print(f"Error setting up global hotkey: {e}")
+            self._setup_fallback_shortcuts()
+    
+    def _setup_fallback_shortcuts(self):
+        """Setup fallback Qt shortcuts if global hotkey registration fails."""
+        print("Using fallback Qt shortcuts (only work when app has focus)")
+        self._visibility_shortcut = QShortcut(QKeySequence("Ctrl+Alt+N"), self)
         self._visibility_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self._visibility_shortcut.activated.connect(self._toggle_manual_visibility)
         
-        # Also register on notes window as backup
         self._visibility_shortcut_notes = QShortcut(QKeySequence("Ctrl+Alt+N"), self.notes_window)
         self._visibility_shortcut_notes.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self._visibility_shortcut_notes.activated.connect(self._toggle_manual_visibility)
