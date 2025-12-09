@@ -29,6 +29,10 @@ class OverlayButton(QWidget):
         self._dragging = False
         self._press_global_pos = None
         
+        # Get theme manager and register for updates
+        self._theme_manager = ThemeManager.get_instance()
+        self._theme_manager.register_listener(self._apply_theme)
+        
         # Set widget properties
         self.setFixedSize(config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -41,6 +45,9 @@ class OverlayButton(QWidget):
         self._hover_animation = QPropertyAnimation(self, b"hoverOpacity")
         self._hover_animation.setDuration(200)
         self._hover_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        # Apply initial theme
+        self._apply_theme()
         
     def get_hover_opacity(self) -> float:
         """Get current hover opacity."""
@@ -107,33 +114,39 @@ class OverlayButton(QWidget):
             self.update()
         super().mouseReleaseEvent(event)
     
+    def _apply_theme(self):
+        """Apply current theme and trigger repaint."""
+        self.update()
+    
     def paintEvent(self, event):
         """Custom paint event to draw the asymmetric button (half rounded square/pill shape)."""
+        theme = self._theme_manager.get_theme()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         width = self.width()
         height = self.height()
-        corner_radius = 12  # Radius for rounded corners
+        corner_radius = float(theme.get("border_radius", 12))
+        shadow_intensity = theme.get("shadow_intensity", 3)
         
         # Create rounded rectangle path
         path = QPainterPath()
-        path.addRoundedRect(0.0, 0.0, float(width), float(height), float(corner_radius), float(corner_radius))
+        path.addRoundedRect(0.0, 0.0, float(width), float(height), corner_radius, corner_radius)
         
         # Draw shadow (uniform)
-        if config.BUTTON_SHADOW_OFFSET:
-            shadow_color = QColor(0, 0, 0, 40)
+        if shadow_intensity > 0:
+            shadow_color = QColor(0, 0, 0, 40 * shadow_intensity)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(shadow_color))
-            shadow_offset = config.BUTTON_SHADOW_OFFSET
+            shadow_offset = shadow_intensity
             painter.translate(0, shadow_offset)
             painter.drawPath(path)
             painter.translate(0, -shadow_offset)
         
-        # Determine background color based on system theme
-        bg_color_tuple = ThemeManager.get_bg_color()
-        bg_color = QColor(*bg_color_tuple)
-        bg_color.setAlpha(int(255 * self._hover_opacity))
+        # Get theme colors
+        bg_color = QColor(theme["button_bg"])
+        bg_opacity = theme.get("window_bg_opacity", 240)
+        bg_color.setAlpha(int(bg_opacity * self._hover_opacity))
         
         # Draw main background first
         painter.setPen(Qt.PenStyle.NoPen)
@@ -142,26 +155,27 @@ class OverlayButton(QWidget):
         
         # Add glow effect on hover (draw as border/outline)
         if self._is_hovered:
-            glow_color = QColor(*config.COLOR_HOVER_GLOW)
-            glow_color.setAlpha(int(150 * self._hover_opacity))
-            painter.setPen(QPen(glow_color, 2))
+            accent_color = QColor(theme["accent_color"])
+            accent_color.setAlpha(int(150 * self._hover_opacity))
+            painter.setPen(QPen(accent_color, 2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
         
         # Draw border (subtle, theme-aware)
-        border_color_tuple = ThemeManager.get_border_color(self._hover_opacity)
-        border_color = QColor(*border_color_tuple)
+        border_color = QColor(theme["button_border"])
+        border_color.setAlpha(int(150 * self._hover_opacity))
         painter.setPen(QPen(border_color, 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(path)
         
         # Draw vertical "NOTES" text (theme-aware)
-        text_color_tuple = ThemeManager.get_text_color()
-        text_color = QColor(*text_color_tuple)
+        text_color = QColor(theme["button_text"])
         text_color.setAlpha(int(255 * self._hover_opacity))
         painter.setPen(QPen(text_color))
         
-        font = QFont("Segoe UI", 10, QFont.Weight.Bold)
+        font_family = theme.get("font_family", "Segoe UI")
+        font_size = theme.get("font_size", 11)
+        font = QFont(font_family, font_size, QFont.Weight.Bold)
         painter.setFont(font)
         
         letters = ["N", "O", "T", "E", "S"]

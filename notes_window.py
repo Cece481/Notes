@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QTabWidget, QMessageBox, QTabBar, QMenu, QInputDialog
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF, QPropertyAnimation, QEasingCurve, QEvent
-from PyQt6.QtGui import QFont, QPainter, QPainterPath, QColor, QBrush, QKeyEvent, QTextCursor
+from PyQt6.QtGui import QFont, QPainter, QPainterPath, QColor, QBrush, QPen, QKeyEvent, QTextCursor
 import config
 from theme_manager import ThemeManager
 import re
@@ -24,8 +24,14 @@ class NotesWindow(QWidget):
         self._save_timer.timeout.connect(self._on_save_timeout)
         self._plus_tab_index = -1  # Initialize plus tab index
         
+        # Get theme manager and register for updates
+        self._theme_manager = ThemeManager.get_instance()
+        self._theme_manager.register_listener(self._apply_theme)
+        self._theme_manager.theme_changed.connect(self._apply_theme)
+        
         self._setup_ui()
         self._setup_styling()
+        self._apply_theme()
     
     def _setup_ui(self):
         """Setup the UI components."""
@@ -98,136 +104,109 @@ class NotesWindow(QWidget):
         # Set window properties
         self.setMinimumSize(config.NOTES_WINDOW_MIN_WIDTH, config.NOTES_WINDOW_MIN_HEIGHT)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    
+    def _apply_theme(self):
+        """Apply current theme to the notes window."""
+        theme = self._theme_manager.get_theme()
         
-        # Get theme colors
-        is_dark = ThemeManager.is_dark_mode()
+        # Convert hex colors to rgba
+        def hex_to_rgba(hex_color, alpha=255):
+            color = QColor(hex_color)
+            return f"rgba({color.red()}, {color.green()}, {color.blue()}, {alpha})"
         
-        if is_dark:
-            # Dark mode stylesheet
-            tab_style = """
-                QTabWidget::pane {
-                    border: 1px solid rgba(100, 100, 100, 150);
-                    border-radius: 8px;
-                    background-color: rgba(32, 32, 32, 240);
-                    top: -1px;
-                }
-                QTabBar::tab {
-                    background-color: rgba(50, 50, 50, 200);
-                    color: rgba(255, 255, 255, 200);
-                    padding: 8px 15px;
-                    margin-right: 2px;
-                    border-top-left-radius: 6px;
-                    border-top-right-radius: 6px;
-                    border: 1px solid rgba(80, 80, 80, 150);
-                }
-                QTabBar::tab:selected {
-                    background-color: rgba(32, 32, 32, 240);
-                    color: rgb(255, 255, 255);
-                    border-bottom: 1px solid rgba(32, 32, 32, 240);
-                }
-                QTabBar::tab:hover {
-                    background-color: rgba(70, 70, 70, 220);
-                }
-                QTabBar::close-button {
-                    image: none;
-                    subcontrol-position: right;
-                    margin: 2px;
-                }
-                QTextEdit {
-                    background-color: rgba(32, 32, 32, 240);
-                    border: none;
-                    border-radius: 8px;
-                    padding: 10px;
-                    color: rgb(255, 255, 255);
-                    selection-background-color: rgba(0, 120, 215, 180);
-                    selection-color: rgb(255, 255, 255);
-                }
-                QTextEdit:focus {
-                    border: 1px solid rgba(0, 120, 215, 200);
-                }
-                QScrollBar:vertical {
-                    background-color: rgba(40, 40, 40, 200);
-                    width: 12px;
-                    border: none;
-                    border-radius: 6px;
-                    margin: 0;
-                }
-                QScrollBar::handle:vertical {
-                    background-color: rgba(100, 100, 100, 200);
-                    border-radius: 6px;
-                    min-height: 30px;
-                }
-                QScrollBar::handle:vertical:hover {
-                    background-color: rgba(130, 130, 130, 200);
-                }
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                    height: 0px;
-                }
-            """
-        else:
-            # Light mode stylesheet
-            tab_style = """
-                QTabWidget::pane {
-                    border: 1px solid rgba(200, 200, 200, 150);
-                    border-radius: 8px;
-                    background-color: rgba(245, 245, 245, 240);
-                    top: -1px;
-                }
-                QTabBar::tab {
-                    background-color: rgba(230, 230, 230, 200);
-                    color: rgba(0, 0, 0, 200);
-                    padding: 8px 15px;
-                    margin-right: 2px;
-                    border-top-left-radius: 6px;
-                    border-top-right-radius: 6px;
-                    border: 1px solid rgba(200, 200, 200, 150);
-                }
-                QTabBar::tab:selected {
-                    background-color: rgba(245, 245, 245, 240);
-                    color: rgb(0, 0, 0);
-                    border-bottom: 1px solid rgba(245, 245, 245, 240);
-                }
-                QTabBar::tab:hover {
-                    background-color: rgba(220, 220, 220, 220);
-                }
-                QTabBar::close-button {
-                    image: none;
-                    subcontrol-position: right;
-                    margin: 2px;
-                }
-                QTextEdit {
-                    background-color: rgba(245, 245, 245, 240);
-                    border: none;
-                    border-radius: 8px;
-                    padding: 10px;
-                    color: rgb(0, 0, 0);
-                    selection-background-color: rgba(0, 120, 215, 180);
-                    selection-color: rgb(255, 255, 255);
-                }
-                QTextEdit:focus {
-                    border: 1px solid rgba(0, 120, 215, 200);
-                }
-                QScrollBar:vertical {
-                    background-color: rgba(240, 240, 240, 200);
-                    width: 12px;
-                    border: none;
-                    border-radius: 6px;
-                    margin: 0;
-                }
-                QScrollBar::handle:vertical {
-                    background-color: rgba(180, 180, 180, 200);
-                    border-radius: 6px;
-                    min-height: 30px;
-                }
-                QScrollBar::handle:vertical:hover {
-                    background-color: rgba(150, 150, 150, 200);
-                }
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                    height: 0px;
-                }
-            """
+        bg_color = theme["window_bg"]
+        bg_opacity = theme.get("window_bg_opacity", 240)
+        border_color = theme["border_color"]
+        window_border_color = theme.get("window_border_color", border_color)
+        text_color = theme["text_primary"]
+        tab_active = theme["tab_bg_active"]
+        tab_inactive = theme["tab_bg_inactive"]
+        tab_text = theme["tab_text_color"]
+        accent = theme["accent_color"]
+        scrollbar = theme["scrollbar_color"]
+        radius = theme.get("border_radius", 12)
+        font_family = theme.get("font_family", "Segoe UI")
+        font_size = theme.get("font_size", 11)
+        
+        # Window opacity
+        window_opacity = theme.get("window_opacity", 95) / 100.0
+        self.setWindowOpacity(window_opacity)
+        
+        # Generate stylesheet
+        tab_style = f"""
+            QTabWidget::pane {{
+                border: 1px solid {hex_to_rgba(window_border_color, 150)};
+                border-radius: {radius}px;
+                background-color: {hex_to_rgba(bg_color, bg_opacity)};
+                top: -1px;
+            }}
+            QTabBar::tab {{
+                background-color: {hex_to_rgba(tab_inactive, 200)};
+                color: {hex_to_rgba(tab_text, 200)};
+                padding: 8px 15px;
+                margin-right: 2px;
+                border-top-left-radius: {radius - 2}px;
+                border-top-right-radius: {radius - 2}px;
+                border: 1px solid {hex_to_rgba(border_color, 150)};
+            }}
+            QTabBar::tab:selected {{
+                background-color: {hex_to_rgba(tab_active, bg_opacity)};
+                color: {tab_text};
+                border-bottom: 1px solid {hex_to_rgba(tab_active, bg_opacity)};
+            }}
+            QTabBar::tab:hover {{
+                background-color: {hex_to_rgba(tab_inactive, 220)};
+            }}
+            QTabBar::close-button {{
+                image: none;
+                subcontrol-position: right;
+                margin: 2px;
+            }}
+            QTextEdit {{
+                background-color: {hex_to_rgba(bg_color, bg_opacity)};
+                border: none;
+                border-radius: {radius}px;
+                padding: 10px;
+                color: {text_color};
+                font-family: "{font_family}";
+                font-size: {font_size}pt;
+                selection-background-color: {hex_to_rgba(accent, 180)};
+                selection-color: {text_color};
+            }}
+            QTextEdit:focus {{
+                border: 1px solid {hex_to_rgba(accent, 200)};
+            }}
+            QScrollBar:vertical {{
+                background-color: {hex_to_rgba(scrollbar, 200)};
+                width: 12px;
+                border: none;
+                border-radius: 6px;
+                margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {hex_to_rgba(scrollbar, 200)};
+                border-radius: 6px;
+                min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {hex_to_rgba(scrollbar, 255)};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+        """
         
         self.tab_widget.setStyleSheet(tab_style)
+        
+        # Update font for all text editors
+        font = QFont(font_family, font_size)
+        for i in range(self.tab_widget.count()):
+            widget = self.tab_widget.widget(i)
+            if isinstance(widget, QTextEdit):
+                widget.setFont(font)
+        
+        # Force repaint to update border color
+        self.update()
     
     def _create_text_editor(self):
         """Create a new text editor widget."""
@@ -757,10 +736,43 @@ class NotesWindow(QWidget):
     
     def paintEvent(self, event):
         """Paint the window with rounded corners and blur effect."""
+        theme = self._theme_manager.get_theme()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Get theme values
+        bg_color = QColor(theme["window_bg"])
+        bg_opacity = theme.get("window_bg_opacity", 240)
+        bg_color.setAlpha(bg_opacity)
+        radius = float(theme.get("border_radius", 12))
+        shadow_intensity = theme.get("shadow_intensity", 3)
         
         # Create rounded rectangle path
         path = QPainterPath()
         rect = QRectF(self.rect())
-        radius = 12.0
+        
+        # Draw shadow if enabled
+        if shadow_intensity > 0:
+            shadow_path = QPainterPath()
+            shadow_path.addRoundedRect(
+                rect.adjusted(shadow_intensity, shadow_intensity, -shadow_intensity, -shadow_intensity),
+                radius, radius
+            )
+            shadow_color = QColor(0, 0, 0, 40 * shadow_intensity)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(shadow_color))
+            painter.drawPath(shadow_path)
+        
+        # Draw main background
+        path.addRoundedRect(rect, radius, radius)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(bg_color))
+        painter.drawPath(path)
+        
+        # Draw border
+        window_border_color = theme.get("window_border_color", theme.get("border_color", "#646464"))
+        border_color = QColor(window_border_color)
+        border_color.setAlpha(150)
+        painter.setPen(QPen(border_color, 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)

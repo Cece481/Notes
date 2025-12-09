@@ -20,6 +20,7 @@ from notes_window import NotesWindow
 from notes_manager import NotesManager
 from fullscreen_detector import FullscreenDetector
 from theme_manager import ThemeManager
+from settings_window import SettingsWindow
 
 
 class OverlayMainWindow(QMainWindow):
@@ -39,11 +40,18 @@ class OverlayMainWindow(QMainWindow):
         self._notes_manager = NotesManager()
         self._fullscreen_detector = FullscreenDetector(self._on_fullscreen_change)
         
+        # Initialize ThemeManager singleton
+        self._theme_manager = ThemeManager.get_instance()
+        
         self._setup_window()
         self._setup_widgets()
         self._setup_animations()
         self._setup_timers()
         self._setup_system_tray()
+        
+        # Create settings window (initially hidden)
+        self.settings_window = SettingsWindow()
+        self.settings_window.hide()
         self._load_button_side()
         self._detect_current_screen()  # Detect which screen button is on
         self._position_widgets()
@@ -116,6 +124,10 @@ class OverlayMainWindow(QMainWindow):
         # Add Show/Hide action
         self.show_hide_action = tray_menu.addAction("Show/Hide Overlay")
         self.show_hide_action.triggered.connect(self._toggle_manual_visibility)
+        
+        # Add Settings action
+        settings_action = tray_menu.addAction("Settings")
+        settings_action.triggered.connect(self._show_settings)
         
         # Add separator
         tray_menu.addSeparator()
@@ -639,6 +651,12 @@ class OverlayMainWindow(QMainWindow):
             self.button.hide()
             self.setWindowOpacity(0.0)
             self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    
+    def _show_settings(self):
+        """Show the settings window."""
+        self.settings_window.show()
+        self.settings_window.raise_()
+        self.settings_window.activateWindow()
 
 
 def main():
