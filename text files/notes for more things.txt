@@ -8,9 +8,9 @@ Optimize positioning for different monitor layouts. (Done)
 
 Add a hidden icon in the lower-right area of the Windows taskbar. (Done)
 
-Add right-click options on the “NOTES” button to open a menu for closing the app and managing the hidden icon.
+Add right-click options on the “NOTES” button to open a menu for closing the app and managing the hidden icon. (Done)
 
-Add a Settings panel to change themes or create custom themes.
+Add a Settings panel to change themes or create custom themes. (Done)
 
 Enable automatic updates from GitHub.
 
@@ -18,12 +18,12 @@ Run it as a regular app instead of a background process. (No need)
 
 Prevent the button from shifting to the left when clicked.(Done)
 
-Add options to change text color and size.
-
-Add automatic numbering for notes.
+Add automatic numbering for notes. (Done)
 
 Reduce the size of the main button. (Done)
 
-Add settings for opacity, colors, and animation effects.
+Add animation effects. (Done)
 
 Ensure support for multiple displays. (Done)
+
+Add pomodoro. 

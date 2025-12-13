@@ -30,3 +30,262 @@ Optional features I'd like:
 - Progress bar during download
 - Rollback mechanism if update fails
 ______________________________________
+# Rich Text Editor - Desktop Notes Overlay App
+
+## Project Context
+The desktop notes overlay app currently has a basic text area. We need to add text formatting capabilities similar to Microsoft Word, but simpler and focused only on text customization.
+
+## Task Requirements
+
+### 1. Formatting Toolbar
+Create a formatting toolbar positioned **below the note page tabs** that includes:
+
+**Text Styling Buttons:**
+- Bold (B icon)
+- Italic (I icon)
+- Underline (U icon)
+- Strikethrough (S icon with line through)
+- Text Color picker
+- Highlight Color picker
+
+**Font Controls:**
+- Font family dropdown (common fonts: Arial, Times New Roman, Calibri, Verdana, Comic Sans MS, Courier New, Georgia, etc.)
+- Font size dropdown (8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72)
+
+**List Controls:**
+- Bullet list button with dropdown for style selection:
+  - Filled circle (•)
+  - Dash (-)
+  - Asterisk (*)
+  - Custom option (let user type their own symbol)
+- Numbered list button (1, 2, 3...)
+- To-Do list button (checkbox list)
+
+**Alignment (optional but recommended):**
+- Align left
+- Align center
+- Align right
+
+### 2. Keyboard Shortcuts
+Implement standard Microsoft Word shortcuts:
+- **Ctrl + B** → Bold
+- **Ctrl + I** → Italic
+- **Ctrl + U** → Underline
+- **Ctrl + Shift + S** → Strikethrough
+- **Ctrl + Shift + L** → Bullet list
+- **Ctrl + Shift + N** → Numbered list
+- **Ctrl + A** → Select all
+- **Ctrl + Z** → Undo
+- **Ctrl + Y** → Redo
+
+### 3. List Auto-Continuation
+**Bullet Lists:**
+- When user presses Enter in a bullet list, automatically create new bullet on next line
+- Press Enter twice (empty bullet) to exit list mode
+- Tab key indents/nests bullet (creates sub-list)
+- Shift+Tab unindents/outdents
+
+**Numbered Lists:**
+- When user presses Enter, automatically increment number (1 → 2 → 3)
+- Press Enter twice (empty number) to exit list mode
+- Tab key creates nested numbered list (1, 2 → 2.1, 2.2)
+- Shift+Tab unindents
+
+**To-Do Lists:**
+- When user presses Enter, automatically create new checkbox on next line
+- Press Enter twice (empty checkbox) to exit to-do mode
+- Tab key indents (creates nested to-do)
+- Shift+Tab unindents
+
+### 4. To-Do List Feature
+**Visual Design:**
+- Empty circle ○ for unchecked state
+- Filled circle with checkmark ✓ for checked state
+- Different color for checked items (e.g., gray text + strikethrough optional)
+
+**Functionality:**
+- Click circle to toggle between checked/unchecked
+- Checked state persists when saving note
+- Keyboard shortcut: Ctrl + Enter to toggle current line's checkbox
+- Visual feedback: hover effect on checkbox
+
+**Behavior:**
+- To-do items are part of the text flow
+- Can mix to-do lists with regular text
+- Each line with checkbox is independent
+
+### 5. Text Selection & Application
+**How Formatting Works:**
+- Select text first, then click formatting button to apply
+- Click button first, then type to apply formatting to new text
+- Multiple formats can stack (bold + italic + underline)
+- Show active formatting in toolbar (highlight active buttons)
+
+**Selected Text Toolbar:**
+- When text is selected, show which formats are currently applied
+- If selected text has mixed formatting, show partial state
+
+### 6. Data Storage Format
+Since notes stay within the app (no file export):
+
+**Storage Structure (JSON example):**
+```json
+{
+  "note_id": "note_001",
+  "tab_name": "My Notes",
+  "content": [
+    {
+      "type": "text",
+      "text": "This is bold text",
+      "format": {
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "strikethrough": false,
+        "font_family": "Arial",
+        "font_size": 12,
+        "color": "#000000",
+        "highlight": null
+      }
+    },
+    {
+      "type": "bullet_list",
+      "style": "•",
+      "items": [
+        {
+          "text": "First item",
+          "format": {...}
+        },
+        {
+          "text": "Second item",
+          "format": {...}
+        }
+      ]
+    },
+    {
+      "type": "todo_list",
+      "items": [
+        {
+          "text": "Buy groceries",
+          "checked": false,
+          "format": {...}
+        },
+        {
+          "text": "Finish report",
+          "checked": true,
+          "format": {...}
+        }
+      ]
+    },
+    {
+      "type": "numbered_list",
+      "items": [...]
+    }
+  ]
+}
+```
+
+**OR use HTML/Rich Text format:**
+```html
+<p><b>This is bold text</b></p>
+<ul style="list-style-type: disc;">
+  <li>First item</li>
+  <li>Second item</li>
+</ul>
+```
+
+Choose the format that works best with your Python framework.
+
+### 7. UI/UX Design Guidelines
+
+**Toolbar Design:**
+- Clean, compact toolbar with icon buttons
+- Group related controls together (text style | font | lists)
+- Use dividers between groups
+- Show tooltips on hover with keyboard shortcuts
+- Disable buttons when not applicable
+- Icons should match app theme (themeable)
+
+**Text Area:**
+- Rich text input field (not plain textarea)
+- Support multiple text formats simultaneously
+- Smooth cursor movement between formatted sections
+- Proper text wrapping
+- Scrollable if content exceeds window
+
+**Visual Feedback:**
+- Active formatting buttons highlight when cursor is in formatted text
+- Cursor position determines which formats are active
+- Smooth transitions when applying/removing formatting
+
+### 8. Technical Implementation
+
+**Python Libraries to Consider:**
+- **PyQt5/PyQt6**: Use QTextEdit widget (has built-in rich text support)
+- **Tkinter**: Use tkinter.Text widget with tags for formatting
+- **wxPython**: Use wx.richtext.RichTextCtrl
+
+**Key Components:**
+1. Rich text editor widget
+2. Toolbar with formatting buttons
+3. Format state manager (track current formatting)
+4. Serialization/deserialization for saving formatted text
+5. Keyboard shortcut handler
+
+### 9. Features to Exclude (Keep It Simple)
+❌ No images
+❌ No tables
+❌ No links/hyperlinks
+❌ No page breaks
+❌ No headers/footers
+❌ No columns
+❌ No drawing tools
+❌ No spell check (unless built-in)
+✅ Focus only on text formatting
+
+### 10. Edge Cases to Handle
+- Copy/paste formatted text from external sources
+- What happens to formatting when changing themes?
+- Undo/redo must work with formatting changes
+- Format persistence across app restarts
+- Handle very long notes with lots of formatting
+- Prevent formatting conflicts (e.g., nested lists)
+
+### 11. Success Criteria
+✓ Formatting toolbar appears below note tabs
+✓ Bold, Italic, Underline, Strikethrough work
+✓ Text color and highlight color work
+✓ Font family and size can be changed
+✓ Bullet lists with 3 style options (•, -, *) + custom
+✓ Numbered lists with auto-increment
+✓ To-do lists with clickable checkboxes
+✓ Lists auto-continue on Enter, exit on double Enter
+✓ Tab/Shift+Tab indent/outdent lists
+✓ All keyboard shortcuts work (Ctrl+B, Ctrl+I, etc.)
+✓ Formatting persists when closing/reopening app
+✓ Selected text shows active formats in toolbar
+✓ To-do checkboxes toggle on click
+✓ Clean, intuitive UI matching app theme
+✓ No images, tables, or complex features
+
+## Deliverables Needed
+1. Rich text editor widget implementation
+2. Formatting toolbar UI with all buttons
+3. Keyboard shortcut system
+4. List auto-continuation logic (bullet, numbered, to-do)
+5. To-do checkbox toggle functionality
+6. Text format serialization/storage system
+7. Undo/redo functionality
+8. Theme integration (toolbar colors match app theme)
+
+---
+
+**Priority Order:**
+1. Basic text formatting (Bold, Italic, Underline, Strikethrough)
+2. Font family and size controls
+3. Keyboard shortcuts
+4. Bullet and numbered lists with auto-continue
+5. To-do list with checkboxes
+6. Text/highlight color pickers
+7. Polish and edge case handling
+______________________________________
