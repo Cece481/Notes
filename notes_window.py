@@ -4,10 +4,10 @@ Notes window with Windows 11 styling, tabs, and auto-save functionality.
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, 
     QPushButton, QTabWidget, QMessageBox, QTabBar, QMenu, QInputDialog,
-    QColorDialog, QToolButton, QComboBox, QStyledItemDelegate, QStyle
+    QColorDialog, QToolButton, QComboBox, QStyledItemDelegate, QStyle, QFileDialog
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF, QPropertyAnimation, QEasingCurve, QEvent, QParallelAnimationGroup, QSequentialAnimationGroup, QSize, QModelIndex, QObject, pyqtSlot, QPoint
-from PyQt6.QtGui import QFont, QPainter, QPainterPath, QColor, QBrush, QPen, QKeyEvent, QTextCursor, QTextCharFormat, QTextFormat, QIcon, QPixmap, QFontMetrics, QTextObjectInterface, QTextDocument
+from PyQt6.QtGui import QFont, QPainter, QPainterPath, QColor, QBrush, QPen, QKeyEvent, QTextCursor, QTextCharFormat, QTextFormat, QIcon, QPixmap, QFontMetrics, QTextObjectInterface, QTextDocument, QKeySequence, QShortcut
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QGraphicsOpacityEffect
 import config
@@ -322,6 +322,63 @@ class NotesWindow(QWidget):
         # Create initial tab (the + button will be added as a tab)
         self._add_new_tab()
         self._add_plus_tab()
+        
+        # Setup keyboard shortcuts
+        self._setup_shortcuts()
+    
+    def _setup_shortcuts(self):
+        """Setup keyboard shortcuts."""
+        # Keyboard shortcuts can be added here in the future
+        pass
+    
+    def _save_as_text_file(self):
+        """Save current note tab as a text file."""
+        text_edit = self._get_current_text_edit()
+        if not text_edit:
+            QMessageBox.warning(self, "No Note", "No note is currently open.")
+            return
+        
+        # Get current tab name for default filename
+        current_index = self.tab_widget.currentIndex()
+        if current_index >= 0:
+            tab_name = self.tab_widget.tabText(current_index)
+            # Remove invalid filename characters
+            import os
+            invalid_chars = '<>:"/\\|?*'
+            for char in invalid_chars:
+                tab_name = tab_name.replace(char, '_')
+            default_filename = f"{tab_name}.txt" if tab_name else "note.txt"
+        else:
+            default_filename = "note.txt"
+        
+        # Open file dialog
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Save Note as Text File",
+            default_filename,
+            "Text Files (*.txt);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                # Get plain text content (removes formatting)
+                plain_text = text_edit.toPlainText()
+                
+                # Write to file
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(plain_text)
+                
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Note saved successfully to:\n{file_path}"
+                )
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to save file:\n{str(e)}"
+                )
     
     def _get_button_style(self):
         """Get button style based on theme."""

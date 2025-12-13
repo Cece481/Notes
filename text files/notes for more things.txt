@@ -27,3 +27,7 @@ Add animation effects. (Done)
 Ensure support for multiple displays. (Done)
 
 Add pomodoro. 
+
+Save as a text file.
+
+Fix multiple launching.

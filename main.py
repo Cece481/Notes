@@ -1100,19 +1100,35 @@ class OverlayMainWindow(QMainWindow):
 
 def main():
     """Application entry point."""
-    app = QApplication(sys.argv)
-    app.setApplicationName(config.APP_NAME)
+    # Single instance check using Windows mutex
+    mutex_name = f"Global\\{config.APP_NAME}_SingleInstance"
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+    last_error = ctypes.windll.kernel32.GetLastError()
     
-    # Prevent application from quitting when main window is closed
-    app.setQuitOnLastWindowClosed(False)
+    # ERROR_ALREADY_EXISTS means another instance is already running
+    if last_error == 183:  # ERROR_ALREADY_EXISTS
+        print("Another instance of the application is already running.")
+        ctypes.windll.kernel32.CloseHandle(mutex)
+        sys.exit(0)
     
-    # High DPI scaling is enabled by default in PyQt6
-    # No need to set AA_EnableHighDpiScaling or AA_UseHighDpiPixmaps
-    
-    window = OverlayMainWindow()
-    window.show()
-    
-    sys.exit(app.exec())
+    try:
+        app = QApplication(sys.argv)
+        app.setApplicationName(config.APP_NAME)
+        
+        # Prevent application from quitting when main window is closed
+        app.setQuitOnLastWindowClosed(False)
+        
+        # High DPI scaling is enabled by default in PyQt6
+        # No need to set AA_EnableHighDpiScaling or AA_UseHighDpiPixmaps
+        
+        window = OverlayMainWindow()
+        window.show()
+        
+        sys.exit(app.exec())
+    finally:
+        # Release mutex when application exits
+        if mutex:
+            ctypes.windll.kernel32.CloseHandle(mutex)
 
 
 if __name__ == "__main__":

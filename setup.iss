@@ -1,14 +1,14 @@
 [Setup]
-AppName=NotesOverlay
-AppVersion=1.11
-DefaultDirName={pf}\NotesOverlay
+AppName=Notesly
+AppVersion=1.12
+DefaultDirName={pf}\Notely
 OutputDir=C:\Users\btser\OneDrive\Documents\GitHub\Notes\Installers
-OutputBaseFilename=NotesOverlay_1.11_Setup
+OutputBaseFilename=NotesOverlay_1.12_Setup
 
 [Files]
-Source: "C:\Users\btser\OneDrive\Documents\GitHub\Notes\dist\NotesOverlay.exe"; DestDir: "{app}"; DestName: "NotesOverlay.exe"
+Source: "C:\Users\btser\OneDrive\Documents\GitHub\Notes\dist\Notely.exe"; DestDir: "{app}"; DestName: "Notely.exe"
 Source: "C:\Users\btser\OneDrive\Documents\GitHub\Notes\app.ico"; DestDir: "{app}"
 
 [Icons]
-Name: "{commonprograms}\NotesOverlay"; Filename: "{app}\NotesOverlay.exe"; IconFilename: "{app}\app.ico"
-Name: "{userdesktop}\NotesOverlay"; Filename: "{app}\NotesOverlay.exe"; IconFilename: "{app}\app.ico"
+Name: "{commonprograms}\Notely"; Filename: "{app}\Notely.exe"; IconFilename: "{app}\app.ico"
+Name: "{userdesktop}\Notely"; Filename: "{app}\Notely.exe"; IconFilename: "{app}\app.ico"
