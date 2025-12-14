@@ -1,9 +1,9 @@
 [Setup]
 AppName=Notesly
-AppVersion=1.12
+AppVersion=2.0
 DefaultDirName={pf}\Notely
 OutputDir=C:\Users\btser\OneDrive\Documents\GitHub\Notes\Installers
-OutputBaseFilename=NotesOverlay_1.12_Setup
+OutputBaseFilename=NotesOverlay_2.0tup
 
 [Files]
 Source: "C:\Users\btser\OneDrive\Documents\GitHub\Notes\dist\Notely.exe"; DestDir: "{app}"; DestName: "Notely.exe"
