@@ -88,6 +88,7 @@ class OverlayMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._is_expanded = False
+        self._is_pomodoro_open = False
         self._is_hidden = False
         self._button_y = config.BUTTON_TOP_MARGIN
         self._button_side = "right"  # "left" or "right"
@@ -96,6 +97,7 @@ class OverlayMainWindow(QMainWindow):
         self._drag_start_button_y = None
         self._is_dragging = False
         self._target_notes_geometry = None  # Target position for smooth following
+        self._target_pomodoro_geometry = None  # Target position for pomodoro window following
         self._last_window_side = None  # Track if window was above or below button
         self._reposition_cooldown = False  # Prevent animation spam
         # Settings for persisting button side preference
@@ -146,7 +148,8 @@ class OverlayMainWindow(QMainWindow):
         """Create and setup UI widgets."""
         # Create overlay button
         self.button = OverlayButton(self)
-        self.button.clicked.connect(self._toggle_expansion)
+        self.button.topClicked.connect(self._open_notes)
+        self.button.bottomClicked.connect(self._open_pomodoro)
         self.button.rightClicked.connect(self._show_button_context_menu)
         self.button.dragStarted.connect(self._on_button_drag_started)
         self.button.dragMoved.connect(self._on_button_drag_moved)
@@ -161,6 +164,9 @@ class OverlayMainWindow(QMainWindow):
         )
         self.notes_window.content_changed.connect(self._on_notes_changed)
         self.notes_window.hide()
+        
+        # Create pomodoro window (initially hidden)
+        self.pomodoro_window = None  # Will be created lazily
     
     def _setup_system_tray(self):
         """Setup system tray icon with context menu."""
@@ -321,10 +327,18 @@ class OverlayMainWindow(QMainWindow):
         self._follow_animation.setDuration(350)
         self._follow_animation.setEasingCurve(QEasingCurve.Type.OutBack)  # Bounce for repositioning
         
+        # Pomodoro window follow animation (will be created when pomodoro window is created)
+        self._pomodoro_follow_animation = None
+        
         # Timer for smooth following with slight trail effect (~60fps)
         self._follow_timer = QTimer(self)
         self._follow_timer.setInterval(16)  # ~60fps
         self._follow_timer.timeout.connect(self._update_window_follow)
+        
+        # Pomodoro window animations (will be created when pomodoro window is created)
+        self._pomodoro_opacity_animation = None
+        self._pomodoro_geometry_animation = None
+        self._pomodoro_animation_group = None
     
     def _setup_timers(self):
         """Setup periodic timers."""
@@ -442,6 +456,232 @@ class OverlayMainWindow(QMainWindow):
         """Persist current button side."""
         self._settings.setValue("button_side", self._button_side)
     
+    def _open_notes(self):
+        """Open notes window when N is clicked."""
+        if self._is_hidden:
+            return
+        
+        # Hide pomodoro window if it's open
+        if self._is_pomodoro_open:
+            self._collapse_pomodoro()
+        
+        if self._is_expanded:
+            self._collapse()
+        else:
+            self._expand()
+    
+    def _open_pomodoro(self):
+        """Open or close pomodoro window when P is clicked (toggle)."""
+        if self._is_hidden:
+            return
+        
+        # Hide notes window if it's open
+        if self._is_expanded:
+            self._collapse()
+        
+        # Toggle pomodoro window
+        if self._is_pomodoro_open:
+            self._collapse_pomodoro()
+        else:
+            self._expand_pomodoro()
+    
+    def _expand_pomodoro(self):
+        """Expand the pomodoro window with Windows 11 style bounce animation."""
+        if self._is_pomodoro_open:
+            return
+        
+        self._is_pomodoro_open = True
+        
+        # Create pomodoro window if it doesn't exist (copy of notes window)
+        if self.pomodoro_window is None:
+            self.pomodoro_window = NotesWindow()
+            self.pomodoro_window.setWindowFlags(
+                Qt.WindowType.FramelessWindowHint |
+                Qt.WindowType.WindowStaysOnTopHint |
+                Qt.WindowType.Tool
+            )
+            
+            # Remove toolbar, tabs bar, and typing area from pomodoro window
+            if hasattr(self.pomodoro_window, 'tab_widget'):
+                self.pomodoro_window.tab_widget.hide()
+            if hasattr(self.pomodoro_window, 'toolbar_toggle_btn'):
+                self.pomodoro_window.toolbar_toggle_btn.hide()
+            if hasattr(self.pomodoro_window, 'formatting_toolbar'):
+                self.pomodoro_window.formatting_toolbar.hide()
+            
+            self.pomodoro_window.hide()
+            
+            # Setup pomodoro animations
+            self._pomodoro_opacity_animation = QPropertyAnimation(self.pomodoro_window, b"windowOpacity")
+            self._pomodoro_opacity_animation.setDuration(self._expand_duration)
+            self._pomodoro_opacity_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+            
+            self._pomodoro_geometry_animation = QPropertyAnimation(self.pomodoro_window, b"geometry")
+            self._pomodoro_geometry_animation.setDuration(self._expand_duration)
+            self._pomodoro_geometry_animation.setEasingCurve(QEasingCurve.Type.OutBack)
+            
+            # Pomodoro follow animation for smooth following during drag
+            self._pomodoro_follow_animation = QPropertyAnimation(self.pomodoro_window, b"geometry")
+            self._pomodoro_follow_animation.setDuration(350)
+            self._pomodoro_follow_animation.setEasingCurve(QEasingCurve.Type.OutBack)
+            
+            self._pomodoro_animation_group = QParallelAnimationGroup()
+            self._pomodoro_animation_group.addAnimation(self._pomodoro_opacity_animation)
+            self._pomodoro_animation_group.addAnimation(self._pomodoro_geometry_animation)
+        
+        screen = self._get_current_screen()
+        screen_geometry = screen.geometry()
+        screen_width = screen_geometry.width()
+        
+        # Calculate button X based on side
+        if self._button_side == "right":
+            button_x = screen_geometry.x() + screen_width - config.BUTTON_WIDTH
+        else:
+            button_x = screen_geometry.x()
+        
+        # Target geometry for pomodoro window
+        pomodoro_target_geom = self._compute_notes_target_geometry()
+        
+        # Calculate start position (from button position, scaled down)
+        button_center_y = screen_geometry.y() + self._button_y + config.BUTTON_HEIGHT // 2
+        
+        # Start geometry: small, at button position
+        start_width = int(config.NOTES_WINDOW_WIDTH * 0.3)
+        start_height = int(config.NOTES_WINDOW_HEIGHT * 0.3)
+        
+        if self._button_side == "right":
+            start_x = button_x - start_width
+        else:
+            start_x = button_x + config.BUTTON_WIDTH
+        
+        start_y = button_center_y - start_height // 2
+        
+        pomodoro_start = QRect(start_x, start_y, start_width, start_height)
+        pomodoro_end = pomodoro_target_geom
+        
+        # Show pomodoro window with initial state
+        self.pomodoro_window.setWindowOpacity(0.0)
+        self.pomodoro_window.setGeometry(pomodoro_start)
+        self.pomodoro_window.show()
+        
+        # Button animation - slight shift with bounce
+        button_start = QRect(0, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+        if self._button_side == "right":
+            button_end = QRect(8, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+        else:
+            button_end = QRect(-8, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+        
+        # Set expansion animation durations and curves
+        self._button_animation.setDuration(self._expand_duration)
+        self._button_animation.setEasingCurve(QEasingCurve.Type.OutBack)
+        
+        self._pomodoro_opacity_animation.setDuration(self._expand_duration)
+        self._pomodoro_opacity_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        self._pomodoro_geometry_animation.setDuration(self._expand_duration)
+        self._pomodoro_geometry_animation.setEasingCurve(QEasingCurve.Type.OutBack)
+        
+        # Setup animation values
+        self._button_animation.setStartValue(button_start)
+        self._button_animation.setEndValue(button_end)
+        
+        self._pomodoro_opacity_animation.setStartValue(0.0)
+        self._pomodoro_opacity_animation.setEndValue(1.0)
+        
+        self._pomodoro_geometry_animation.setStartValue(pomodoro_start)
+        self._pomodoro_geometry_animation.setEndValue(pomodoro_end)
+        
+        # Add button animation to pomodoro animation group
+        # First, remove it from notes group if it's there (won't error if not found)
+        self._animation_group.removeAnimation(self._button_animation)
+        
+        # Check if button animation is already in pomodoro group
+        button_in_pomodoro = False
+        for i in range(self._pomodoro_animation_group.animationCount()):
+            if self._pomodoro_animation_group.animationAt(i) == self._button_animation:
+                button_in_pomodoro = True
+                break
+        
+        # Add to pomodoro group if not already there
+        if not button_in_pomodoro:
+            self._pomodoro_animation_group.addAnimation(self._button_animation)
+        
+        # Start animations
+        self._pomodoro_animation_group.start()
+    
+    def _collapse_pomodoro(self):
+        """Collapse the pomodoro window with smooth shrink animation back to button."""
+        if not self._is_pomodoro_open or self.pomodoro_window is None:
+            return
+        
+        self._is_pomodoro_open = False
+        
+        screen = self._get_current_screen()
+        screen_geometry = screen.geometry()
+        screen_width = screen_geometry.width()
+        
+        # Calculate button position
+        if self._button_side == "right":
+            button_x = screen_geometry.x() + screen_width - config.BUTTON_WIDTH
+        else:
+            button_x = screen_geometry.x()
+        
+        button_center_y = screen_geometry.y() + self._button_y + config.BUTTON_HEIGHT // 2
+        
+        # End geometry: small, at button position (reverse of expand)
+        end_width = int(config.NOTES_WINDOW_WIDTH * 0.3)
+        end_height = int(config.NOTES_WINDOW_HEIGHT * 0.3)
+        
+        if self._button_side == "right":
+            end_x = button_x - end_width
+        else:
+            end_x = button_x + config.BUTTON_WIDTH
+        
+        end_y = button_center_y - end_height // 2
+        
+        pomodoro_start = self.pomodoro_window.geometry()
+        pomodoro_end = QRect(end_x, end_y, end_width, end_height)
+        
+        # Animate button back
+        button_start = self.button.geometry()
+        button_end = QRect(0, 0, config.BUTTON_WIDTH, config.BUTTON_HEIGHT)
+        
+        # Set collapse animation durations and curves (faster, ease-in)
+        self._button_animation.setDuration(self._collapse_duration)
+        self._button_animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        
+        self._pomodoro_opacity_animation.setDuration(self._collapse_duration)
+        self._pomodoro_opacity_animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        
+        self._pomodoro_geometry_animation.setDuration(self._collapse_duration)
+        self._pomodoro_geometry_animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        
+        # Setup animation values
+        self._button_animation.setStartValue(button_start)
+        self._button_animation.setEndValue(button_end)
+        
+        self._pomodoro_opacity_animation.setStartValue(1.0)
+        self._pomodoro_opacity_animation.setEndValue(0.0)
+        
+        self._pomodoro_geometry_animation.setStartValue(pomodoro_start)
+        self._pomodoro_geometry_animation.setEndValue(pomodoro_end)
+        
+        # Disconnect any previous connections to avoid multiple calls
+        try:
+            self._pomodoro_opacity_animation.finished.disconnect()
+        except:
+            pass
+        
+        # Hide pomodoro window after animation completes
+        def hide_pomodoro():
+            if not self._is_pomodoro_open:
+                self.pomodoro_window.hide()
+        
+        self._pomodoro_opacity_animation.finished.connect(hide_pomodoro)
+        
+        # Start animations
+        self._pomodoro_animation_group.start()
+    
     def _toggle_expansion(self):
         """Toggle between collapsed and expanded states."""
         if self._is_hidden:
@@ -520,6 +760,22 @@ class OverlayMainWindow(QMainWindow):
         self._notes_geometry_animation.setStartValue(notes_start)
         self._notes_geometry_animation.setEndValue(notes_end)
         
+        # Make sure button animation is in notes animation group
+        # First, remove it from pomodoro group if it's there
+        if self._pomodoro_animation_group:
+            self._pomodoro_animation_group.removeAnimation(self._button_animation)
+        
+        # Check if button animation is already in notes group
+        button_in_notes = False
+        for i in range(self._animation_group.animationCount()):
+            if self._animation_group.animationAt(i) == self._button_animation:
+                button_in_notes = True
+                break
+        
+        # Add to notes group if not already there
+        if not button_in_notes:
+            self._animation_group.addAnimation(self._button_animation)
+        
         # Start animations
         self._animation_group.start()
     
@@ -579,6 +835,22 @@ class OverlayMainWindow(QMainWindow):
         
         self._notes_geometry_animation.setStartValue(notes_start)
         self._notes_geometry_animation.setEndValue(notes_end)
+        
+        # Make sure button animation is in notes animation group
+        # First, remove it from pomodoro group if it's there
+        if self._pomodoro_animation_group:
+            self._pomodoro_animation_group.removeAnimation(self._button_animation)
+        
+        # Check if button animation is already in notes group
+        button_in_notes = False
+        for i in range(self._animation_group.animationCount()):
+            if self._animation_group.animationAt(i) == self._button_animation:
+                button_in_notes = True
+                break
+        
+        # Add to notes group if not already there
+        if not button_in_notes:
+            self._animation_group.addAnimation(self._button_animation)
         
         # Disconnect any previous connections to avoid multiple calls
         try:
@@ -704,6 +976,14 @@ class OverlayMainWindow(QMainWindow):
             # Start smooth following timer
             self._target_notes_geometry = current_geom
             self._follow_timer.start()
+        elif self._is_pomodoro_open and self.pomodoro_window:
+            current_geom = self.pomodoro_window.geometry()
+            button_y = self.y()
+            self._last_window_side = "above" if current_geom.y() < button_y else "below"
+            
+            # Start smooth following timer for pomodoro
+            self._target_pomodoro_geometry = current_geom
+            self._follow_timer.start()
     
     def _on_button_drag_moved(self, global_y: float):
         """Update button and notes positions while dragging with smooth window following."""
@@ -754,6 +1034,23 @@ class OverlayMainWindow(QMainWindow):
                 self._target_notes_geometry = new_target
                 if not self._last_window_side:
                     self._last_window_side = new_window_side
+        elif self._is_pomodoro_open and self.pomodoro_window:
+            # Handle pomodoro window following
+            new_target = self._compute_notes_target_geometry()  # Same positioning logic
+            
+            # Check if we need to reposition (window side change)
+            button_screen_y = self._button_y
+            new_window_side = "above" if new_target.y() < (screen_geometry.y() + button_screen_y) else "below"
+            
+            # If side changed and not in cooldown, trigger smooth reposition animation
+            if self._last_window_side and new_window_side != self._last_window_side and not self._reposition_cooldown:
+                self._trigger_pomodoro_reposition_animation(new_target)
+                self._last_window_side = new_window_side
+            else:
+                # Normal following - update target for smooth interpolation
+                self._target_pomodoro_geometry = new_target
+                if not self._last_window_side:
+                    self._last_window_side = new_window_side
         else:
             # If not expanded, just update position directly
             self._position_notes_window()
@@ -767,6 +1064,12 @@ class OverlayMainWindow(QMainWindow):
         
         # Stop follow timer
         self._follow_timer.stop()
+        
+        # Stop any follow animations
+        if self._follow_animation:
+            self._follow_animation.stop()
+        if self._pomodoro_follow_animation:
+            self._pomodoro_follow_animation.stop()
 
         # Decide which side to snap to based on final horizontal position on current screen
         screen = self._get_current_screen()
@@ -782,6 +1085,10 @@ class OverlayMainWindow(QMainWindow):
         self._save_button_side()
         self._snap_button_to_current_side()
         # Note: Notes window animation is now handled inside _snap_button_to_current_side
+        # Also position pomodoro window if it's open
+        if self._is_pomodoro_open and self.pomodoro_window:
+            target_geom = self._compute_notes_target_geometry()
+            self.pomodoro_window.setGeometry(target_geom)
 
     def _snap_button_to_current_side(self):
         """Animate button snapping to the nearest screen edge with bounce effect."""
@@ -849,6 +1156,10 @@ class OverlayMainWindow(QMainWindow):
             # Ensure notes window is in correct position after snap completes
             if self._is_expanded and not self._follow_animation.state() == QPropertyAnimation.State.Running:
                 self._position_notes_window()
+            # Ensure pomodoro window is in correct position after snap completes
+            if self._is_pomodoro_open and self.pomodoro_window:
+                target_geom = self._compute_notes_target_geometry()
+                self.pomodoro_window.setGeometry(target_geom)
         
         self._snap_animation.finished.connect(on_snap_finished)
         
@@ -858,41 +1169,78 @@ class OverlayMainWindow(QMainWindow):
         # Also animate notes window in sync if expanded
         if self._is_expanded and self.notes_window.isVisible():
             self._animate_window_snap_sync(duration, easing)
+        # Also animate pomodoro window in sync if open
+        elif self._is_pomodoro_open and self.pomodoro_window and self.pomodoro_window.isVisible():
+            self._animate_pomodoro_window_snap_sync(duration, easing)
     
     def _update_window_follow(self):
         """Timer callback for smooth window following during drag (lerp interpolation)."""
-        if not self._is_dragging or not self._is_expanded or self._target_notes_geometry is None:
+        if not self._is_dragging:
             return
         
-        # Skip if reposition animation is running
-        if self._follow_animation.state() == QPropertyAnimation.State.Running:
-            return
+        # Handle notes window following
+        if self._is_expanded and self._target_notes_geometry is not None:
+            # Skip if reposition animation is running
+            if self._follow_animation.state() == QPropertyAnimation.State.Running:
+                return
+            
+            # Get current geometry
+            current = self.notes_window.geometry()
+            target = self._target_notes_geometry
+            
+            # Calculate distance for adaptive smoothing
+            dist_x = abs(target.x() - current.x())
+            dist_y = abs(target.y() - current.y())
+            total_dist = (dist_x ** 2 + dist_y ** 2) ** 0.5
+            
+            # Adaptive smoothing: faster when far, slower when close (for precise landing)
+            if total_dist > 100:
+                smoothing = 0.35  # Faster catch-up
+            elif total_dist > 30:
+                smoothing = 0.25  # Normal following
+            else:
+                smoothing = 0.4   # Quick settle when close
+            
+            # Linear interpolation (lerp) for smooth trailing effect
+            new_x = int(current.x() + (target.x() - current.x()) * smoothing)
+            new_y = int(current.y() + (target.y() - current.y()) * smoothing)
+            new_width = int(current.width() + (target.width() - current.width()) * smoothing)
+            new_height = int(current.height() + (target.height() - current.height()) * smoothing)
+            
+            # Apply new position
+            self.notes_window.setGeometry(new_x, new_y, new_width, new_height)
         
-        # Get current geometry
-        current = self.notes_window.geometry()
-        target = self._target_notes_geometry
-        
-        # Calculate distance for adaptive smoothing
-        dist_x = abs(target.x() - current.x())
-        dist_y = abs(target.y() - current.y())
-        total_dist = (dist_x ** 2 + dist_y ** 2) ** 0.5
-        
-        # Adaptive smoothing: faster when far, slower when close (for precise landing)
-        if total_dist > 100:
-            smoothing = 0.35  # Faster catch-up
-        elif total_dist > 30:
-            smoothing = 0.25  # Normal following
-        else:
-            smoothing = 0.4   # Quick settle when close
-        
-        # Linear interpolation (lerp) for smooth trailing effect
-        new_x = int(current.x() + (target.x() - current.x()) * smoothing)
-        new_y = int(current.y() + (target.y() - current.y()) * smoothing)
-        new_width = int(current.width() + (target.width() - current.width()) * smoothing)
-        new_height = int(current.height() + (target.height() - current.height()) * smoothing)
-        
-        # Apply new position
-        self.notes_window.setGeometry(new_x, new_y, new_width, new_height)
+        # Handle pomodoro window following
+        if self._is_pomodoro_open and self.pomodoro_window and self._target_pomodoro_geometry is not None:
+            # Skip if reposition animation is running
+            if self._pomodoro_follow_animation and self._pomodoro_follow_animation.state() == QPropertyAnimation.State.Running:
+                return
+            
+            # Get current geometry
+            current = self.pomodoro_window.geometry()
+            target = self._target_pomodoro_geometry
+            
+            # Calculate distance for adaptive smoothing
+            dist_x = abs(target.x() - current.x())
+            dist_y = abs(target.y() - current.y())
+            total_dist = (dist_x ** 2 + dist_y ** 2) ** 0.5
+            
+            # Adaptive smoothing: faster when far, slower when close (for precise landing)
+            if total_dist > 100:
+                smoothing = 0.35  # Faster catch-up
+            elif total_dist > 30:
+                smoothing = 0.25  # Normal following
+            else:
+                smoothing = 0.4   # Quick settle when close
+            
+            # Linear interpolation (lerp) for smooth trailing effect
+            new_x = int(current.x() + (target.x() - current.x()) * smoothing)
+            new_y = int(current.y() + (target.y() - current.y()) * smoothing)
+            new_width = int(current.width() + (target.width() - current.width()) * smoothing)
+            new_height = int(current.height() + (target.height() - current.height()) * smoothing)
+            
+            # Apply new position
+            self.pomodoro_window.setGeometry(new_x, new_y, new_width, new_height)
     
     def _trigger_reposition_animation(self, target_geometry: QRect):
         """Trigger smooth animation when window needs to flip from above to below or vice versa."""
@@ -924,6 +1272,40 @@ class OverlayMainWindow(QMainWindow):
         
         self._follow_animation.finished.connect(on_reposition_finished)
         self._follow_animation.start()
+    
+    def _trigger_pomodoro_reposition_animation(self, target_geometry: QRect):
+        """Trigger smooth animation when pomodoro window needs to flip from above to below or vice versa."""
+        if not self._pomodoro_follow_animation:
+            return
+        
+        # Set cooldown to prevent animation spam
+        self._reposition_cooldown = True
+        
+        # Stop the follow timer temporarily during animation
+        self._follow_timer.stop()
+        
+        # Setup and start the reposition animation
+        self._pomodoro_follow_animation.stop()
+        self._pomodoro_follow_animation.setStartValue(self.pomodoro_window.geometry())
+        self._pomodoro_follow_animation.setEndValue(target_geometry)
+        self._pomodoro_follow_animation.setDuration(350)
+        self._pomodoro_follow_animation.setEasingCurve(QEasingCurve.Type.OutBack)  # Bounce effect
+        
+        # Disconnect any previous connections
+        try:
+            self._pomodoro_follow_animation.finished.disconnect()
+        except:
+            pass
+        
+        # Resume following after animation and reset cooldown
+        def on_reposition_finished():
+            self._reposition_cooldown = False
+            self._target_pomodoro_geometry = target_geometry
+            if self._is_dragging:
+                self._follow_timer.start()
+        
+        self._pomodoro_follow_animation.finished.connect(on_reposition_finished)
+        self._pomodoro_follow_animation.start()
     
     def _animate_notes_to_final_position(self):
         """Animate notes window to its final position after drag ends."""
@@ -966,6 +1348,34 @@ class OverlayMainWindow(QMainWindow):
         self._follow_animation.setDuration(duration)
         self._follow_animation.setEasingCurve(easing)  # Match button animation
         self._follow_animation.start()
+    
+    def _animate_pomodoro_window_snap_sync(self, duration: int, easing: QEasingCurve.Type = QEasingCurve.Type.OutBack):
+        """Animate pomodoro window in sync with button snap animation."""
+        if not self._pomodoro_follow_animation:
+            return
+        
+        # Calculate the final target position after snap completes
+        target = self._compute_notes_target_geometry()
+        current = self.pomodoro_window.geometry()
+        
+        # If already close to target, just set directly
+        dist = abs(current.x() - target.x()) + abs(current.y() - target.y())
+        if dist < 5:
+            self.pomodoro_window.setGeometry(target)
+            return
+        
+        # Stop any running animation
+        self._pomodoro_follow_animation.stop()
+        
+        # Ensure window is at current position to prevent visual jump
+        self.pomodoro_window.setGeometry(current)
+        
+        # Setup synchronized animation with matching easing
+        self._pomodoro_follow_animation.setStartValue(current)
+        self._pomodoro_follow_animation.setEndValue(target)
+        self._pomodoro_follow_animation.setDuration(duration)
+        self._pomodoro_follow_animation.setEasingCurve(easing)  # Match button animation
+        self._pomodoro_follow_animation.start()
     
     def _on_notes_changed(self, content: str):
         """Handle notes content change."""

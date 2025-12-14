@@ -10,7 +10,9 @@ from theme_manager import ThemeManager
 
 class OverlayButton(QWidget):
     """Signal emitted when button is clicked."""
-    clicked = pyqtSignal()
+    clicked = pyqtSignal()  # Keep for backward compatibility
+    topClicked = pyqtSignal()  # Top half clicked (N for Notes)
+    bottomClicked = pyqtSignal()  # Bottom half clicked (P for Pomodoro)
     rightClicked = pyqtSignal()  # Right-click for context menu
     dragStarted = pyqtSignal(float)  # Global Y position when drag begins
     dragMoved = pyqtSignal(float)    # Current global Y during drag
@@ -18,7 +20,8 @@ class OverlayButton(QWidget):
     """
     Custom button widget with rounded rectangle design:
     - Equal rounded corners for a softer square look
-    - Vertical "NOTES" text
+    - Top half: "N" for Notes
+    - Bottom half: "P" for Pomodoro
     - Windows 11 acrylic blur effect
     """
     
@@ -113,6 +116,18 @@ class OverlayButton(QWidget):
                 self._dragging = False
                 self.dragEnded.emit()
             elif self.rect().contains(event.pos()):
+                # Determine which half was clicked
+                click_y = event.pos().y()
+                height = self.height()
+                midpoint = height / 2
+                
+                if click_y < midpoint:
+                    # Top half clicked (N for Notes)
+                    self.topClicked.emit()
+                else:
+                    # Bottom half clicked (P for Pomodoro)
+                    self.bottomClicked.emit()
+                # Also emit general clicked for backward compatibility
                 self.clicked.emit()
             self._press_global_pos = None
             self.update()
@@ -172,24 +187,29 @@ class OverlayButton(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(path)
         
-        # Draw vertical "NOTES" text (theme-aware)
+        # Draw "N" on top half and "P" on bottom half
         text_color = QColor(theme["button_text"])
         text_color.setAlpha(int(255 * self._hover_opacity))
         painter.setPen(QPen(text_color))
         
         font_family = theme.get("font_family", "Segoe UI")
-        font_size = theme.get("font_size", 11)
+        font_size = theme.get("font_size", 14)
         font = QFont(font_family, font_size, QFont.Weight.Bold)
         painter.setFont(font)
         
-        letters = ["N", "O", "T", "E", "S"]
-        letter_height = height / (len(letters) + 1)
-        start_y = letter_height
+        metrics = QFontMetrics(font)
         
-        for i, letter in enumerate(letters):
-            metrics = QFontMetrics(font)
-            letter_width = metrics.horizontalAdvance(letter)
-            x = (width - letter_width) / 2
-            y = start_y + (i * letter_height)
-            painter.drawText(int(x), int(y), letter)
+        # Draw "N" on top half (centered vertically in top half)
+        n_text = "N"
+        n_width = metrics.horizontalAdvance(n_text)
+        n_x = (width - n_width) / 2
+        n_y = height / 4  # Center of top half
+        painter.drawText(int(n_x), int(n_y), n_text)
+        
+        # Draw "P" on bottom half (centered vertically in bottom half)
+        p_text = "P"
+        p_width = metrics.horizontalAdvance(p_text)
+        p_x = (width - p_width) / 2
+        p_y = height * 3 / 4  # Center of bottom half
+        painter.drawText(int(p_x), int(p_y), p_text)
 

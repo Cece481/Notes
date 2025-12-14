@@ -328,8 +328,10 @@ class NotesWindow(QWidget):
     
     def _setup_shortcuts(self):
         """Setup keyboard shortcuts."""
-        # Keyboard shortcuts can be added here in the future
-        pass
+        # Save as text file shortcut: Ctrl+Shift+S
+        save_shortcut = QShortcut(QKeySequence("Ctrl+Shift+S"), self)
+        save_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        save_shortcut.activated.connect(self._save_as_text_file)
     
     def _save_as_text_file(self):
         """Save current note tab as a text file."""

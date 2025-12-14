@@ -28,6 +28,6 @@ Ensure support for multiple displays. (Done)
 
 Add pomodoro. 
 
-Save as a text file.
+Save as a text file. (Done)
 
-Fix multiple launching.
+Fix multiple launching. (Done)
