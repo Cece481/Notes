@@ -24,6 +24,7 @@ from PyQt6.QtGui import QScreen, QKeySequence, QShortcut, QCursor, QIcon, QPixma
 import config
 from overlay_button import OverlayButton
 from notes_window import NotesWindow
+from pomodoro_window import PomodoroWindow
 from notes_manager import NotesManager
 from fullscreen_detector import FullscreenDetector
 from theme_manager import ThemeManager
@@ -492,23 +493,14 @@ class OverlayMainWindow(QMainWindow):
         
         self._is_pomodoro_open = True
         
-        # Create pomodoro window if it doesn't exist (copy of notes window)
+        # Create pomodoro window if it doesn't exist
         if self.pomodoro_window is None:
-            self.pomodoro_window = NotesWindow()
+            self.pomodoro_window = PomodoroWindow()
             self.pomodoro_window.setWindowFlags(
                 Qt.WindowType.FramelessWindowHint |
                 Qt.WindowType.WindowStaysOnTopHint |
                 Qt.WindowType.Tool
             )
-            
-            # Remove toolbar, tabs bar, and typing area from pomodoro window
-            if hasattr(self.pomodoro_window, 'tab_widget'):
-                self.pomodoro_window.tab_widget.hide()
-            if hasattr(self.pomodoro_window, 'toolbar_toggle_btn'):
-                self.pomodoro_window.toolbar_toggle_btn.hide()
-            if hasattr(self.pomodoro_window, 'formatting_toolbar'):
-                self.pomodoro_window.formatting_toolbar.hide()
-            
             self.pomodoro_window.hide()
             
             # Setup pomodoro animations
@@ -1416,6 +1408,8 @@ class OverlayMainWindow(QMainWindow):
             event.ignore()
             self.hide()
             self.notes_window.hide()
+            if self.pomodoro_window:
+                self.pomodoro_window.hide()
             self.tray_icon.showMessage(
                 "Notes Overlay",
                 "Application minimized to tray. Right-click the tray icon to exit.",
@@ -1443,7 +1437,11 @@ class OverlayMainWindow(QMainWindow):
             self._is_hidden = True
             if self._is_expanded:
                 self._collapse()
+            if self._is_pomodoro_open:
+                self._collapse_pomodoro()
             self.notes_window.hide()
+            if self.pomodoro_window:
+                self.pomodoro_window.hide()
             self.button.hide()
             self.setWindowOpacity(0.0)
             self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
